@@ -1,0 +1,11 @@
+#pragma once
+
+typedef struct _IGB_DEVICE
+{
+	IGB_ADAPTER *Adapter;
+} IGB_DEVICE, *PIGB_DEVICE;
+
+WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(IGB_DEVICE, IgbGetDeviceContext);
+
+EVT_WDF_DEVICE_PREPARE_HARDWARE EvtDevicePrepareHardware;
+EVT_WDF_DEVICE_RELEASE_HARDWARE EvtDeviceReleaseHardware;

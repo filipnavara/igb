@@ -1,0 +1,29 @@
+#include <windows.h>
+#include <ntverp.h>
+
+#define VER_FILETYPE                VFT_DRV
+#define VER_FILESUBTYPE             VFT2_DRV_NETWORK
+#define VER_FILEDESCRIPTION_STR     "Intel GbE Family Driver"
+#define VER_INTERNALNAME_STR        "igb.sys"
+#define VER_ORIGINALFILENAME_STR    "igb.sys"
+
+#define VER_FILEVERSION             6,00,00,0000
+#define VER_FILEVERSION_STR         "6.06.00.0000"
+
+#undef VER_PRODUCTVERSION
+#define VER_PRODUCTVERSION          VER_FILEVERSION
+
+#undef VER_PRODUCTVERSION_STR
+#define VER_PRODUCTVERSION_STR      VER_FILEVERSION_STR
+
+#define VER_LEGALCOPYRIGHT_STR      "Copyright (C) 2024 Filip Navara"
+#undef VER_COMPANYNAME_STR
+#define VER_COMPANYNAME_STR         "Filip Navara"
+
+#undef VER_PRODUCTNAME_STR
+#define VER_PRODUCTNAME_STR         "Intel GbE Family Driver"
+#define VER_LANGNEUTRAL
+
+#include "common.ver"
+
+
