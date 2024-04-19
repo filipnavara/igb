@@ -1,4 +1,4 @@
-# Intel GbE Family Community Driver for Windows 11
+# Intel® GbE Family Community Driver for Windows 11
 
 **Disclaimer: I am not affiliated with Intel Corporation.**
 
