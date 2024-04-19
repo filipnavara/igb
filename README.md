@@ -2,7 +2,7 @@
 
 **Disclaimer: I am not affiliated with Intel Corporation.**
 
-This is basic Windows 11 driver for Intel I210 controller that can be compiled for ARM64 architecture. It is not supposed to replace the Intel drivers and merely serves to fill in the void until official ARM64 drivers are available directly from Intel.
+This is basic Windows 11 driver for Intel I210 network controller that can be compiled for ARM64 architecture. It is not supposed to replace the Intel drivers and merely serves to fill in the void until official ARM64 drivers are available directly from Intel.
 
 ## Credits
 
