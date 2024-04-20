@@ -103,7 +103,7 @@ IgbTxQueueInitialize(
 
 	ULONG txSize;
 	GOTO_IF_NOT_NT_SUCCESS(Exit, status,
-		RtlULongMult(tx->NumTxDesc, sizeof(struct e1000_tx_desc), &txSize));
+		RtlULongMult(tx->NumTxDesc, sizeof(union e1000_adv_tx_desc), &txSize));
 
 	GOTO_IF_NOT_NT_SUCCESS(Exit, status,
 		WdfCommonBufferCreate(
@@ -112,7 +112,7 @@ IgbTxQueueInitialize(
 			WDF_NO_OBJECT_ATTRIBUTES,
 			&tx->TxdArray));
 
-	tx->TxdBase = static_cast<struct e1000_tx_desc*>(
+	tx->TxdBase = static_cast<union e1000_adv_tx_desc*>(
 		WdfCommonBufferGetAlignedVirtualAddress(tx->TxdArray));
 	tx->TxSize = txSize;
 
@@ -138,7 +138,7 @@ IgbPostTxDescriptor(
 	_In_ UINT32 packetIndex)
 {
 	NET_RING* fr = NetRingCollectionGetFragmentRing(tx->Rings);
-	struct e1000_tx_desc* txd = &tx->TxdBase[tx->TxDescIndex];
+	union e1000_adv_tx_desc* txd = &tx->TxdBase[tx->TxDescIndex];
 
 	// calculate the index in the fragment ring and retrieve
 	// the fragment being posted to populate the hardware descriptor
@@ -149,12 +149,13 @@ IgbPostTxDescriptor(
 
 	RtlZeroMemory(txd, sizeof(*txd));
 
-	u32 flags = E1000_TXD_CMD_IFCS | E1000_TXD_CMD_RS;
-	txd->buffer_addr = logicalAddress->LogicalAddress + fragment->Offset;
+	// TODO: Should we skip status reports (E1000_ADVTXD_DCMD_RS) depending on some state?
+	u32 flags = E1000_ADVTXD_DCMD_DEXT | E1000_ADVTXD_DTYP_DATA | E1000_ADVTXD_DCMD_IFCS | E1000_ADVTXD_DCMD_RS;
+	txd->read.buffer_addr = logicalAddress->LogicalAddress + fragment->Offset;
 	if (tcb->NumTxDesc + 1 == packet->FragmentCount)
-		flags |= E1000_TXD_CMD_EOP;
-	txd->lower.data = flags | (u16)fragment->ValidLength;
-	txd->upper.data = 0;
+		flags |= E1000_ADVTXD_DCMD_EOP;
+	txd->read.cmd_type_len = flags | (u16)fragment->ValidLength;
+	txd->read.olinfo_status = ((u16)fragment->ValidLength) << E1000_ADVTXD_PAYLEN_SHIFT;
 	MemoryBarrier();
 
 	tx->TxDescIndex = (tx->TxDescIndex + 1) % tx->NumTxDesc;
@@ -176,8 +177,8 @@ IgbIsPacketTransferComplete(
 	_In_ IGB_TCB* tcb)
 {
 	size_t lastTxDescIdx = (tcb->FirstTxDescIdx + tcb->NumTxDesc - 1) % tx->NumTxDesc;
-	struct e1000_tx_desc* txd = &tx->TxdBase[lastTxDescIdx];
-	return (txd->upper.data & E1000_TXD_STAT_DD) != 0;
+	union e1000_adv_tx_desc* txd = &tx->TxdBase[lastTxDescIdx];
+	return (txd->wb.status & E1000_TXD_STAT_DD) != 0;
 }
 
 static

@@ -75,9 +75,9 @@ RxIndicateReceives(
 	{
 		UINT32 const fragmentIndex = fr->BeginIndex;
 
-		struct e1000_rx_desc const* rxd = &rx->RxdBase[fragmentIndex];
+		union e1000_adv_rx_desc const* rxd = &rx->RxdBase[fragmentIndex];
 
-		if ((rxd->status & E1000_RXD_STAT_DD) == 0)
+		if ((rxd->wb.upper.status_error & E1000_RXD_STAT_DD) == 0)
 			break;
 		if (pr->BeginIndex == pr->EndIndex)
 			break;
@@ -86,7 +86,7 @@ RxIndicateReceives(
 		NT_FRE_ASSERT(fr->BeginIndex != fr->EndIndex);
 
 		NET_FRAGMENT* fragment = NetRingGetFragmentAtIndex(fr, fragmentIndex);
-		fragment->ValidLength = rxd->length; // (rxd->so0.Frame_Length - ETHER_CRC_LEN);
+		fragment->ValidLength = rxd->wb.upper.length;
 		fragment->Capacity = fragment->ValidLength;
 		fragment->Offset = 0;
 
@@ -106,13 +106,12 @@ RxIndicateReceives(
 static
 void
 IgbPostRxDescriptor(
-	_In_ struct e1000_rx_desc* desc,
+	_In_ union e1000_adv_rx_desc* desc,
 	_In_ NET_FRAGMENT_LOGICAL_ADDRESS const* logicalAddress)
 {
 	RtlZeroMemory(desc, sizeof(*desc));
-	desc->buffer_addr = logicalAddress->LogicalAddress;
-	desc->status = 0;
-	desc->length = 0;
+	desc->read.pkt_addr = logicalAddress->LogicalAddress;
+	desc->read.hdr_addr = 0;
 	MemoryBarrier();
 }
 
@@ -160,9 +159,9 @@ IgbRxQueueInitialize(
 
 	ULONG rxSize;
 	GOTO_IF_NOT_NT_SUCCESS(Exit, status,
-		RtlULongMult(rx->NumRxDesc, sizeof(struct e1000_rx_desc), &rxSize));
+		RtlULongMult(rx->NumRxDesc, sizeof(union e1000_adv_rx_desc), &rxSize));
 
-	UINT32 const rxdSize = pr->NumberOfElements * sizeof(struct e1000_rx_desc);
+	UINT32 const rxdSize = pr->NumberOfElements * sizeof(union e1000_adv_rx_desc);
 	GOTO_IF_NOT_NT_SUCCESS(Exit, status,
 		WdfCommonBufferCreate(
 			rx->Adapter->DmaEnabler,
@@ -170,7 +169,7 @@ IgbRxQueueInitialize(
 			WDF_NO_OBJECT_ATTRIBUTES,
 			&rx->RxdArray));
 
-	rx->RxdBase = static_cast<struct e1000_rx_desc*>(WdfCommonBufferGetAlignedVirtualAddress(rx->RxdArray));
+	rx->RxdBase = static_cast<union e1000_adv_rx_desc*>(WdfCommonBufferGetAlignedVirtualAddress(rx->RxdArray));
 	rx->RxdSize = rxdSize;
 
 Exit:
@@ -222,8 +221,9 @@ EvtRxQueueStart(
 	u32 rctl = E1000_READ_REG(hw, E1000_RCTL);
 	E1000_WRITE_REG(hw, E1000_RCTL, rctl & ~E1000_RCTL_EN);
 
-	srrctl = 0;// E1000_SRRCTL_DESCTYPE_ADV_ONEBUF;
-	//srrctl |= 2048 >> E1000_SRRCTL_BSIZEPKT_SHIFT;
+	// Use advanced descriptor format without header split/replication
+	srrctl = E1000_SRRCTL_DESCTYPE_ADV_ONEBUF;
+
 	rctl &= ~E1000_RCTL_LPE;
 	rctl |= E1000_RCTL_SZ_2048;
 

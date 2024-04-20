@@ -8,7 +8,7 @@ typedef struct _IGB_RXQUEUE {
 
 	// descriptor information
 	WDFCOMMONBUFFER RxdArray;
-	struct e1000_rx_desc* RxdBase;
+	union e1000_adv_rx_desc* RxdBase;
 	size_t RxdSize;
 
 	USHORT NumRxDesc;

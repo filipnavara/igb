@@ -19,7 +19,7 @@ typedef struct _IGB_TXQUEUE {
 
 	// descriptor information
 	WDFCOMMONBUFFER TxdArray;
-	struct e1000_tx_desc* TxdBase;
+	union e1000_adv_tx_desc* TxdBase;
 	size_t TxSize;
 
 	USHORT NumTxDesc;
