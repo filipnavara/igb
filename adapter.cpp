@@ -162,6 +162,52 @@ IgbAdapterSetDatapathCapabilities(
 	NetAdapterSetDataPathCapabilities(adapter->NetAdapter, &txCapabilities, &rxCapabilities);
 }
 
+static
+void
+EvtAdapterOffloadSetTxChecksum(
+	_In_ NETADAPTER netAdapter,
+	_In_ NETOFFLOAD offload)
+{
+	IGB_ADAPTER* adapter = IgbGetAdapterContext(netAdapter);
+
+	/*adapter->TxIpHwChkSum = NetOffloadIsTxChecksumIPv4Enabled(offload);
+	adapter->TxTcpHwChkSum = NetOffloadIsTxChecksumTcpEnabled(offload);
+	adapter->TxUdpHwChkSum = NetOffloadIsTxChecksumUdpEnabled(offload);*/
+	DBGPRINT("EvtAdapterOffloadSetTxChecksum IP: %d TCP: %d UDP: %d\n",
+		NetOffloadIsTxChecksumIPv4Enabled(offload),
+		NetOffloadIsTxChecksumTcpEnabled(offload),
+		NetOffloadIsTxChecksumUdpEnabled(offload));
+}
+
+static
+void
+IgbAdapterSetOffloadCapabilities(
+	_In_ IGB_ADAPTER const* adapter)
+{
+	/*NET_ADAPTER_OFFLOAD_TX_CHECKSUM_CAPABILITIES txChecksumOffloadCapabilities;
+
+	NET_ADAPTER_OFFLOAD_TX_CHECKSUM_CAPABILITIES_INIT(
+		&txChecksumOffloadCapabilities,
+		NetAdapterOffloadLayer3FlagIPv4NoOptions |
+		NetAdapterOffloadLayer3FlagIPv4WithOptions |
+		NetAdapterOffloadLayer3FlagIPv6NoExtensions |
+		NetAdapterOffloadLayer3FlagIPv6WithExtensions,
+		EvtAdapterOffloadSetTxChecksum);
+	txChecksumOffloadCapabilities.Layer4Flags =
+		NetAdapterOffloadLayer4FlagTcpNoOptions |
+		NetAdapterOffloadLayer4FlagTcpWithOptions |
+		NetAdapterOffloadLayer4FlagUdp;
+	txChecksumOffloadCapabilities.Layer4HeaderOffsetLimit = 511;
+	NetAdapterOffloadSetTxChecksumCapabilities(adapter->NetAdapter, &txChecksumOffloadCapabilities);*/
+
+	/*NET_ADAPTER_OFFLOAD_IEEE8021Q_TAG_CAPABILITIES ieee8021qTagOffloadCapabilities;
+	NET_ADAPTER_OFFLOAD_IEEE8021Q_TAG_CAPABILITIES_INIT(
+		&ieee8021qTagOffloadCapabilities,
+		NetAdapterOffloadIeee8021PriorityTaggingFlag |
+		NetAdapterOffloadIeee8021VlanTaggingFlag);
+	NetAdapterOffloadSetIeee8021qTagCapabilities(adapter->NetAdapter, &ieee8021qTagOffloadCapabilities);*/
+}
+
 _Use_decl_annotations_
 NTSTATUS
 IgbAdapterStart(
@@ -174,6 +220,7 @@ IgbAdapterStart(
 	IgbAdapterSetLinkLayerCapabilities(adapter);
 	IgbAdapterSetReceiveFilterCapabilities(adapter);
 	IgbAdapterSetDatapathCapabilities(adapter);
+	IgbAdapterSetOffloadCapabilities(adapter);
 
 	IgbUpdateReceiveFilters(adapter);
 

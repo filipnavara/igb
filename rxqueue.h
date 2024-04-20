@@ -14,10 +14,11 @@ typedef struct _IGB_RXQUEUE {
 	USHORT NumRxDesc;
 
 	NET_EXTENSION LogicalAddressExtension;
+	NET_EXTENSION Ieee8021qExtension;
 	/*NET_EXTENSION ChecksumExtension;
 	NET_EXTENSION VirtualAddressExtension;
 	NET_EXTENSION HashValueExtension;
-	NET_EXTENSION Ieee8021qExtension;*/
+	*/
 
 	ULONG QueueId;
 } IGB_RXQUEUE, *PIGB_RXQUEUE;

@@ -25,11 +25,11 @@ typedef struct _IGB_TXQUEUE {
 	USHORT NumTxDesc;
 	USHORT TxDescIndex;
 
-	//NET_EXTENSION ChecksumExtension;
 	//NET_EXTENSION GsoExtension;
 	//NET_EXTENSION VirtualAddressExtension;
 	NET_EXTENSION LogicalAddressExtension;
-	//NET_EXTENSION Ieee8021qExtension;
+	NET_EXTENSION Ieee8021qExtension;
+	NET_EXTENSION ChecksumExtension;
 
 	ULONG QueueId;
 	UINT8 Priority;

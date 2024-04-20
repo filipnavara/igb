@@ -7,8 +7,8 @@
 #include "interrupt.h"
 #include "link.h"
 
-#undef DBGPRINT
-#define DBGPRINT(...)
+//#undef DBGPRINT
+//#define DBGPRINT(...)
 
 _Use_decl_annotations_
 NTSTATUS
@@ -53,6 +53,14 @@ EvtAdapterCreateRxQueue(
 
 	NetRxQueueGetExtension(rxQueue, &extension, &rx->LogicalAddressExtension);
 
+	NET_EXTENSION_QUERY_INIT(
+		&extension,
+		NET_PACKET_EXTENSION_IEEE8021Q_NAME,
+		NET_PACKET_EXTENSION_IEEE8021Q_VERSION_1,
+		NetExtensionTypePacket);
+
+	NetRxQueueGetExtension(rxQueue, &extension, &rx->Ieee8021qExtension);
+
 	GOTO_IF_NOT_NT_SUCCESS(Exit, status,
 		IgbRxQueueInitialize(rxQueue, adapter));
 
@@ -95,6 +103,17 @@ RxIndicateReceives(
 		NET_PACKET* packet = NetRingGetPacketAtIndex(pr, packetIndex);
 		packet->FragmentIndex = fragmentIndex;
 		packet->FragmentCount = 1;
+
+		if (rx->Ieee8021qExtension.Enabled)
+		{
+			NET_PACKET_IEEE8021Q* ieee8021q = NetExtensionGetPacketIeee8021Q(&rx->Ieee8021qExtension, packetIndex);
+			if ((rxd->wb.upper.status_error & E1000_RXD_STAT_VP) == 0)
+			{
+				u16 vlanId = rxd->wb.upper.vlan;
+				ieee8021q->PriorityCodePoint = vlanId >> 13;
+				ieee8021q->VlanIdentifier = vlanId & 0xfff;
+			}
+		}
 
 		packet->Layout.Layer2Type = NetPacketLayer2TypeEthernet;
 
@@ -277,16 +296,10 @@ EvtRxQueueStop(
 {
 	DBGPRINT("EvtRxQueueStop\n");
 	IGB_RXQUEUE* rx = IgbGetRxQueueContext(rxQueue);
-	struct e1000_hw* hw = &rx->Adapter->Hw;
 
 	ASSERT(rx->QueueId < IGB_MAX_RX_QUEUES);
 
 	WdfSpinLockAcquire(rx->Adapter->Lock);
-
-	// Disable the queue
-	u32 rxdctl = E1000_READ_REG(hw, E1000_RXDCTL(rx->QueueId));
-	rxdctl &= ~E1000_RXDCTL_QUEUE_ENABLE;
-	E1000_WRITE_REG(hw, E1000_RXDCTL(rx->QueueId), rxdctl);
 
 	IgbRxQueueSetInterrupt(rx, false);
 	rx->Adapter->RxQueues[rx->QueueId] = WDF_NO_HANDLE;
@@ -338,11 +351,14 @@ EvtRxQueueCancel(
 	DBGPRINT("EvtRxQueueCancel\n");
 
 	IGB_RXQUEUE* rx = IgbGetRxQueueContext(rxQueue);
+	struct e1000_hw* hw = &rx->Adapter->Hw;
 
 	WdfSpinLockAcquire(rx->Adapter->Lock);
 
-	// FIXME
-	//re_stop(&rx->Adapter->bsdData);
+	// Disable the queue
+	u32 rxdctl = E1000_READ_REG(hw, E1000_RXDCTL(rx->QueueId));
+	rxdctl &= ~E1000_RXDCTL_QUEUE_ENABLE;
+	E1000_WRITE_REG(hw, E1000_RXDCTL(rx->QueueId), rxdctl);
 
 	WdfSpinLockRelease(rx->Adapter->Lock);
 
@@ -350,6 +366,8 @@ EvtRxQueueCancel(
 	// indicated during rx disable. advance will continue to be called
 	// after cancel until all packets are returned to the framework.
 	RxIndicateReceives(rx);
+
+	DBGPRINT("EvtRxQueueCancel - in the middle\n");
 
 	NET_RING* pr = NetRingCollectionGetPacketRing(rx->Rings);
 
@@ -364,4 +382,6 @@ EvtRxQueueCancel(
 	NET_RING* fr = NetRingCollectionGetFragmentRing(rx->Rings);
 
 	fr->BeginIndex = fr->EndIndex;
+
+	DBGPRINT("EvtRxQueueCancel - done\n");
 }
