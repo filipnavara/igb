@@ -63,10 +63,6 @@ EvtInterruptIsr(
 		return TRUE;
 	}
 
-	// Mask off the interrupts
-	E1000_WRITE_REG(hw, E1000_IMC, 0xffffffff);
-	E1000_WRITE_FLUSH(hw);
-
 	if ((reg_icr & (E1000_ICR_FER | E1000_ICR_DOUTSYNC | E1000_ICR_DRSTA | E1000_ICR_ECCER | E1000_ICR_THS)) &&
 		!InterlockedExchange8(&interrupt->PciInterrupt, TRUE))
 	{
@@ -152,9 +148,4 @@ EvtInterruptDpc(
 		hw->mac.get_link_status = 1;
 		IgbCheckLinkStatus(adapter);
 	}
-
-	WdfInterruptAcquireLock(adapter->Interrupt->Handle);
-	E1000_WRITE_REG(hw, E1000_IMS, IMS_ENABLE_MASK);
-	E1000_WRITE_FLUSH(hw);
-	WdfInterruptReleaseLock(adapter->Interrupt->Handle);
 }
