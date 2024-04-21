@@ -184,7 +184,7 @@ void
 IgbAdapterSetOffloadCapabilities(
 	_In_ IGB_ADAPTER const* adapter)
 {
-	/*NET_ADAPTER_OFFLOAD_TX_CHECKSUM_CAPABILITIES txChecksumOffloadCapabilities;
+	NET_ADAPTER_OFFLOAD_TX_CHECKSUM_CAPABILITIES txChecksumOffloadCapabilities;
 
 	NET_ADAPTER_OFFLOAD_TX_CHECKSUM_CAPABILITIES_INIT(
 		&txChecksumOffloadCapabilities,
@@ -198,14 +198,14 @@ IgbAdapterSetOffloadCapabilities(
 		NetAdapterOffloadLayer4FlagTcpWithOptions |
 		NetAdapterOffloadLayer4FlagUdp;
 	txChecksumOffloadCapabilities.Layer4HeaderOffsetLimit = 511;
-	NetAdapterOffloadSetTxChecksumCapabilities(adapter->NetAdapter, &txChecksumOffloadCapabilities);*/
+	NetAdapterOffloadSetTxChecksumCapabilities(adapter->NetAdapter, &txChecksumOffloadCapabilities);
 
-	/*NET_ADAPTER_OFFLOAD_IEEE8021Q_TAG_CAPABILITIES ieee8021qTagOffloadCapabilities;
+	NET_ADAPTER_OFFLOAD_IEEE8021Q_TAG_CAPABILITIES ieee8021qTagOffloadCapabilities;
 	NET_ADAPTER_OFFLOAD_IEEE8021Q_TAG_CAPABILITIES_INIT(
 		&ieee8021qTagOffloadCapabilities,
 		NetAdapterOffloadIeee8021PriorityTaggingFlag |
 		NetAdapterOffloadIeee8021VlanTaggingFlag);
-	NetAdapterOffloadSetIeee8021qTagCapabilities(adapter->NetAdapter, &ieee8021qTagOffloadCapabilities);*/
+	NetAdapterOffloadSetIeee8021qTagCapabilities(adapter->NetAdapter, &ieee8021qTagOffloadCapabilities);
 }
 
 _Use_decl_annotations_

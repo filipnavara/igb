@@ -7,8 +7,8 @@
 #include "interrupt.h"
 #include "link.h"
 
-//#undef DBGPRINT
-//#define DBGPRINT(...)
+#undef DBGPRINT
+#define DBGPRINT(...)
 
 _Use_decl_annotations_
 NTSTATUS

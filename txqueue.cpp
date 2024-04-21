@@ -184,7 +184,7 @@ IgbPostContextDescriptor(
 				ctxd->type_tucmd_mlhl |= E1000_ADVTXD_TUCMD_IPV4;
 			else if (NetPacketIsIpv6(packet))
 				ctxd->type_tucmd_mlhl |= E1000_ADVTXD_TUCMD_IPV6;
-			olinfo_status |= E1000_TXD_POPTS_IXSM;
+			olinfo_status |= E1000_TXD_POPTS_IXSM << 8;
 		}
 
 		if (checksumInfo->Layer4 == NetPacketTxChecksumActionRequired)
@@ -193,7 +193,7 @@ IgbPostContextDescriptor(
 				ctxd->type_tucmd_mlhl |= E1000_ADVTXD_TUCMD_L4T_TCP;
 			else if (packet->Layout.Layer4Type == NetPacketLayer4TypeUdp)
 				ctxd->type_tucmd_mlhl |= E1000_ADVTXD_TUCMD_L4T_UDP;
-			olinfo_status |= E1000_TXD_POPTS_TXSM;
+			olinfo_status |= E1000_TXD_POPTS_TXSM << 8;
 		}
 	}
 
