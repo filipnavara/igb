@@ -255,7 +255,9 @@ IgbTransmitPackets(
 			u32 cmd_type_len = E1000_ADVTXD_DCMD_DEXT | E1000_ADVTXD_DTYP_DATA | E1000_ADVTXD_DCMD_IFCS;
 			u32 olinfo_status = 0;//((u16)packet->) << E1000_ADVTXD_PAYLEN_SHIFT;
 			u32 packet_length = 0;
+
 			tcb->FirstTxDescIdx = tx->TxDescIndex;
+			tcb->NumTxDesc = 0;
 
 			if (needContextDescriptor)
 			{
@@ -276,7 +278,7 @@ IgbTransmitPackets(
 			olinfo_status |= packet_length << E1000_ADVTXD_PAYLEN_SHIFT;
 
 			fragmentIndex = packet->FragmentIndex;
-			for (tcb->NumTxDesc = 0; fragmentIndex != fragmentEndIndex; tcb->NumTxDesc++)
+			for (; fragmentIndex != fragmentEndIndex; tcb->NumTxDesc++)
 			{
 				NET_FRAGMENT const* fragment = NetRingGetFragmentAtIndex(fragmentRing, fragmentIndex);
 				union e1000_adv_tx_desc* txd = &tx->TxdBase[tx->TxDescIndex];
