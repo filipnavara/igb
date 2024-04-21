@@ -7,8 +7,8 @@
 #include "interrupt.h"
 #include "link.h"
 
-//#undef DBGPRINT
-//#define DBGPRINT(...)
+#undef DBGPRINT
+#define DBGPRINT(...)
 
 _Use_decl_annotations_
 NTSTATUS
@@ -278,23 +278,23 @@ IgbTransmitPackets(
 			olinfo_status |= packet_length << E1000_ADVTXD_PAYLEN_SHIFT;
 
 			fragmentIndex = packet->FragmentIndex;
+			union e1000_adv_tx_desc* lastTxd = 0;
 			for (; fragmentIndex != fragmentEndIndex; tcb->NumTxDesc++)
 			{
 				NET_FRAGMENT const* fragment = NetRingGetFragmentAtIndex(fragmentRing, fragmentIndex);
-				union e1000_adv_tx_desc* txd = &tx->TxdBase[tx->TxDescIndex];
+				union e1000_adv_tx_desc* txd = lastTxd = &tx->TxdBase[tx->TxDescIndex];
 				NET_FRAGMENT_LOGICAL_ADDRESS const* logicalAddress = NetExtensionGetFragmentLogicalAddress(
 					&tx->LogicalAddressExtension, fragmentIndex);
 
 				RtlZeroMemory(txd, sizeof(*txd));
 				txd->read.buffer_addr = logicalAddress->LogicalAddress + fragment->Offset;
-				if (tcb->NumTxDesc + 1 == packet->FragmentCount)
-					cmd_type_len |= E1000_ADVTXD_DCMD_EOP | E1000_ADVTXD_DCMD_RS;
 				txd->read.cmd_type_len = cmd_type_len | (u16)fragment->ValidLength;
 				txd->read.olinfo_status = olinfo_status;
 				tx->TxDescIndex = (tx->TxDescIndex + 1) % tx->NumTxDesc;
 
 				fragmentIndex = NetRingIncrementIndex(fragmentRing, fragmentIndex);
 			}
+			lastTxd->read.cmd_type_len |= E1000_ADVTXD_DCMD_EOP | E1000_ADVTXD_DCMD_RS;
 			fragmentRing->NextIndex = fragmentIndex;
 
 			programmedPackets = true;
