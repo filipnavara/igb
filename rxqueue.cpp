@@ -140,7 +140,7 @@ RxIndicateReceives(
 
 			if ((ptype & E1000_RXDADV_PKTTYPE_TCP) == E1000_RXDADV_PKTTYPE_TCP)
 				packet->Layout.Layer4Type = NetPacketLayer4TypeTcp;
-			else if ((ptype & E1000_RXDADV_PKTTYPE_TCP) == E1000_RXDADV_PKTTYPE_UDP)
+			else if ((ptype & E1000_RXDADV_PKTTYPE_UDP) == E1000_RXDADV_PKTTYPE_UDP)
 				packet->Layout.Layer4Type = NetPacketLayer4TypeUdp;
 
 			if ((rxd->wb.upper.status_error & E1000_RXD_STAT_IPCS) != 0)
