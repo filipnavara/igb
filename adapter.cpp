@@ -226,7 +226,7 @@ void
 IgbAdapterSetOffloadCapabilities(
 	_In_ IGB_ADAPTER const* adapter)
 {
-	/*NET_ADAPTER_OFFLOAD_GSO_CAPABILITIES gsoOffloadCapabilities;
+	NET_ADAPTER_OFFLOAD_GSO_CAPABILITIES gsoOffloadCapabilities;
 	NET_ADAPTER_OFFLOAD_GSO_CAPABILITIES_INIT(
 		&gsoOffloadCapabilities,
 		NetAdapterOffloadLayer3FlagIPv4NoOptions |
@@ -236,10 +236,11 @@ IgbAdapterSetOffloadCapabilities(
 		NetAdapterOffloadLayer4FlagTcpNoOptions |
 		NetAdapterOffloadLayer4FlagTcpWithOptions |
 		NetAdapterOffloadLayer4FlagUdp,
-		240,
+		0xffff,
 		1,
 		EvtAdapterOffloadSetGso);
-	NetAdapterOffloadSetGsoCapabilities(adapter->NetAdapter, &gsoOffloadCapabilities);*/
+	gsoOffloadCapabilities.Layer4HeaderOffsetLimit = 240;
+	NetAdapterOffloadSetGsoCapabilities(adapter->NetAdapter, &gsoOffloadCapabilities);
 
 	NET_ADAPTER_OFFLOAD_TX_CHECKSUM_CAPABILITIES txChecksumOffloadCapabilities;
 	NET_ADAPTER_OFFLOAD_TX_CHECKSUM_CAPABILITIES_INIT(

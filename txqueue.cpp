@@ -163,6 +163,7 @@ IgbPostContextDescriptor(
 	IGB_ADAPTER* adapter = tx->Adapter;
 	bool checksumEnabled = (adapter->TxTcpHwChkSum || adapter->TxIpHwChkSum || adapter->TxUdpHwChkSum);
 	bool lsoEnabled = (adapter->LSOv4 || adapter->LSOv6);
+	bool contextUsed = false;
 
 	RtlZeroMemory(ctxd, sizeof(*ctxd));
 	ctxd->type_tucmd_mlhl = E1000_ADVTXD_DCMD_DEXT | E1000_ADVTXD_DTYP_CTXT;
@@ -179,9 +180,10 @@ IgbPostContextDescriptor(
 		// vlanId = ((vlanId >> 8) & 0xff) | ((vlanId << 8) & 0xff00); -- Do we need to flip bytes?
 		ctxd->vlan_macip_lens |= vlanId << E1000_ADVTXD_VLAN_SHIFT;
 		cmd_type_len |= E1000_ADVTXD_DCMD_VLE;
+		contextUsed = true;
 	}
 
-	/*if (tx->GsoExtension.Enabled && lsoEnabled)
+	if (tx->GsoExtension.Enabled && lsoEnabled)
 	{
 		NET_PACKET_GSO* gsoInfo = NetExtensionGetPacketGso(&tx->GsoExtension, packetIndex);
 		UINT32 mss = packet->Layout.Layer4Type == NetPacketLayer4TypeTcp ? gsoInfo->TCP.Mss : gsoInfo->UDP.Mss;
@@ -192,12 +194,9 @@ IgbPostContextDescriptor(
 			if (NetPacketIsIpv4(packet))
 				olinfo_status |= E1000_TXD_POPTS_IXSM << 8;
 			olinfo_status |= E1000_TXD_POPTS_TXSM << 8;
-			if (packet->Layout.Layer4Type == NetPacketLayer4TypeTcp)
-				ctxd->mss_l4len_idx |= mss << E1000_ADVTXD_MSS_SHIFT;
-			else
-				ctxd->mss_l4len_idx |= mss << E1000_ADVTXD_MSS_SHIFT;
+			ctxd->mss_l4len_idx |= mss << E1000_ADVTXD_MSS_SHIFT;
 		}
-	}*/
+	}
 
 	if (tx->ChecksumExtension.Enabled && checksumEnabled)
 	{
@@ -221,10 +220,15 @@ IgbPostContextDescriptor(
 			ctxd->type_tucmd_mlhl |= E1000_ADVTXD_TUCMD_L4T_TCP;
 		else if (packet->Layout.Layer4Type == NetPacketLayer4TypeUdp)
 			ctxd->type_tucmd_mlhl |= E1000_ADVTXD_TUCMD_L4T_UDP;
+
+		contextUsed = true;
 	}
 
-	tx->TxDescIndex = (tx->TxDescIndex + 1) % tx->NumTxDesc;
-	tcb->NumTxDesc++;
+	if (contextUsed)
+	{
+		tx->TxDescIndex = (tx->TxDescIndex + 1) % tx->NumTxDesc;
+		tcb->NumTxDesc++;
+	}
 }
 
 static
@@ -262,7 +266,6 @@ IgbTransmitPackets(
 	ULONG fragmentIndex;
 	ULONG fragmentEndIndex;
 	ULONG availableDescriptors;
-	bool needContextDescriptor = tx->Ieee8021qExtension.Enabled || tx->ChecksumExtension.Enabled;
 
 	availableDescriptors = tx->NumTxDesc - tx->TxDescIndex;
 
@@ -272,24 +275,22 @@ IgbTransmitPackets(
 		if (!packet->Ignore)
 		{
 			// Bail out if there are not enough TX descriptors to describe the
-			// whole packet.
-			if (packet->FragmentCount + (needContextDescriptor ? 1 : 0) > availableDescriptors)
+			// whole packet. We reserve a space for one extra context descriptor
+			// even if it's not always used.
+			if (packet->FragmentCount + 1 > availableDescriptors)
 			{
 				break;
 			}
 
 			IGB_TCB* tcb = GetTcbFromPacket(tx, packetIndex);
 			u32 cmd_type_len = E1000_ADVTXD_DCMD_DEXT | E1000_ADVTXD_DTYP_DATA | E1000_ADVTXD_DCMD_IFCS;
-			u32 olinfo_status = 0;//((u16)packet->) << E1000_ADVTXD_PAYLEN_SHIFT;
+			u32 olinfo_status = 0;
 			u32 packet_length = 0;
 
 			tcb->FirstTxDescIdx = tx->TxDescIndex;
 			tcb->NumTxDesc = 0;
 
-			if (needContextDescriptor)
-			{
-				IgbPostContextDescriptor(tx, tcb, packet, packetIndex, cmd_type_len, olinfo_status);
-			}
+			IgbPostContextDescriptor(tx, tcb, packet, packetIndex, cmd_type_len, olinfo_status);
 
 			fragmentIndex = packet->FragmentIndex;
 			fragmentEndIndex = NetRingAdvanceIndex(fragmentRing, fragmentIndex, packet->FragmentCount);
