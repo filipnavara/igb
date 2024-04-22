@@ -181,11 +181,32 @@ EvtAdapterOffloadSetTxChecksum(
 
 static
 void
+EvtAdapterOffloadSetRxChecksum(
+	_In_ NETADAPTER netAdapter,
+	_In_ NETOFFLOAD offload)
+{
+	IGB_ADAPTER* adapter = IgbGetAdapterContext(netAdapter);
+	u32 rxcsum = E1000_READ_REG(&adapter->Hw, E1000_RXCSUM);
+
+	DBGPRINT("EvtAdapterOffloadSetRxChecksum IP: %d TCP: %d UDP: %d\n",
+		NetOffloadIsRxChecksumIPv4Enabled(offload),
+		NetOffloadIsRxChecksumTcpEnabled(offload),
+		NetOffloadIsRxChecksumUdpEnabled(offload));
+
+	rxcsum &= ~(E1000_RXCSUM_IPOFL | E1000_RXCSUM_TUOFL);
+	rxcsum |= NetOffloadIsRxChecksumIPv4Enabled(offload) ? E1000_RXCSUM_IPOFL : 0;
+	rxcsum |= NetOffloadIsRxChecksumTcpEnabled(offload) ? E1000_RXCSUM_TUOFL : 0;
+	rxcsum |= NetOffloadIsRxChecksumUdpEnabled(offload) ? E1000_RXCSUM_TUOFL : 0;
+	
+	E1000_WRITE_REG(&adapter->Hw, E1000_RXCSUM, rxcsum);
+}
+
+static
+void
 IgbAdapterSetOffloadCapabilities(
 	_In_ IGB_ADAPTER const* adapter)
 {
 	NET_ADAPTER_OFFLOAD_TX_CHECKSUM_CAPABILITIES txChecksumOffloadCapabilities;
-
 	NET_ADAPTER_OFFLOAD_TX_CHECKSUM_CAPABILITIES_INIT(
 		&txChecksumOffloadCapabilities,
 		NetAdapterOffloadLayer3FlagIPv4NoOptions |
@@ -199,6 +220,12 @@ IgbAdapterSetOffloadCapabilities(
 		NetAdapterOffloadLayer4FlagUdp;
 	txChecksumOffloadCapabilities.Layer4HeaderOffsetLimit = 511;
 	NetAdapterOffloadSetTxChecksumCapabilities(adapter->NetAdapter, &txChecksumOffloadCapabilities);
+
+	NET_ADAPTER_OFFLOAD_RX_CHECKSUM_CAPABILITIES rxChecksumOffloadCapabilities;
+	NET_ADAPTER_OFFLOAD_RX_CHECKSUM_CAPABILITIES_INIT(
+		&rxChecksumOffloadCapabilities,
+		EvtAdapterOffloadSetRxChecksum);
+	NetAdapterOffloadSetRxChecksumCapabilities(adapter->NetAdapter, &rxChecksumOffloadCapabilities);
 
 	NET_ADAPTER_OFFLOAD_IEEE8021Q_TAG_CAPABILITIES ieee8021qTagOffloadCapabilities;
 	NET_ADAPTER_OFFLOAD_IEEE8021Q_TAG_CAPABILITIES_INIT(
