@@ -41,14 +41,14 @@ typedef struct _IGB_ADAPTER
 	//FLOW_CTRL FlowControl;
 	//UINT16 VlanID;
 	//ULONG64 MaxSpeed;
-	//BOOLEAN TxIpHwChkSum;
-	//BOOLEAN TxTcpHwChkSum;
-	//BOOLEAN TxUdpHwChkSum;
-	//BOOLEAN RxIpHwChkSum;
-	//BOOLEAN RxTcpHwChkSum;
-	//BOOLEAN RxUdpHwChkSum;
-	//BOOLEAN LSOv4;
-	//BOOLEAN LSOv6;
+	BOOLEAN TxIpHwChkSum;
+	BOOLEAN TxTcpHwChkSum;
+	BOOLEAN TxUdpHwChkSum;
+	BOOLEAN RxIpHwChkSum;
+	BOOLEAN RxTcpHwChkSum;
+	BOOLEAN RxUdpHwChkSum;
+	BOOLEAN LSOv4;
+	BOOLEAN LSOv6;
 
 	struct e1000_hw Hw;
 } IGB_ADAPTER, *PIGB_ADAPTER;

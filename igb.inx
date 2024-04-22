@@ -46,7 +46,7 @@ AddReg                  = NetworkAddress.kw
 ;AddReg                  = VlanID.kw
 ;AddReg                  = FlowControl.kw
 AddReg                  = OffloadChecksum.kw
-AddReg                  = PriorityVlanTag.kw
+;AddReg                  = PriorityVlanTag.kw
 ;AddReg                  = LSO.kw
 
 [ndi.reg]

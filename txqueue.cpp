@@ -67,6 +67,13 @@ EvtAdapterCreateTxQueue(
 
 	NET_EXTENSION_QUERY_INIT(
 		&extension,
+		NET_PACKET_EXTENSION_GSO_NAME,
+		NET_PACKET_EXTENSION_GSO_VERSION_1,
+		NetExtensionTypePacket);
+	NetTxQueueGetExtension(txQueue, &extension, &tx->GsoExtension);
+
+	NET_EXTENSION_QUERY_INIT(
+		&extension,
 		NET_PACKET_EXTENSION_CHECKSUM_NAME,
 		NET_PACKET_EXTENSION_CHECKSUM_VERSION_1,
 		NetExtensionTypePacket);
@@ -146,13 +153,16 @@ static
 void
 IgbPostContextDescriptor(
 	_In_ IGB_TXQUEUE* tx,
-	_In_ IGB_TCB const* tcb,
+	_In_ IGB_TCB* tcb,
 	_In_ NET_PACKET const* packet,
 	_In_ UINT32 packetIndex,
 	_Inout_ u32 &cmd_type_len,
 	_Inout_ u32 &olinfo_status)
 {
 	struct e1000_adv_tx_context_desc* ctxd = (struct e1000_adv_tx_context_desc*)&tx->TxdBase[tx->TxDescIndex];
+	IGB_ADAPTER* adapter = tx->Adapter;
+	bool checksumEnabled = (adapter->TxTcpHwChkSum || adapter->TxIpHwChkSum || adapter->TxUdpHwChkSum);
+	bool lsoEnabled = (adapter->LSOv4 || adapter->LSOv6);
 
 	RtlZeroMemory(ctxd, sizeof(*ctxd));
 	ctxd->type_tucmd_mlhl = E1000_ADVTXD_DCMD_DEXT | E1000_ADVTXD_DTYP_CTXT;
@@ -171,33 +181,50 @@ IgbPostContextDescriptor(
 		cmd_type_len |= E1000_ADVTXD_DCMD_VLE;
 	}
 
-	if (tx->ChecksumExtension.Enabled)
+	/*if (tx->GsoExtension.Enabled && lsoEnabled)
+	{
+		NET_PACKET_GSO* gsoInfo = NetExtensionGetPacketGso(&tx->GsoExtension, packetIndex);
+		UINT32 mss = packet->Layout.Layer4Type == NetPacketLayer4TypeTcp ? gsoInfo->TCP.Mss : gsoInfo->UDP.Mss;
+
+		if (mss > 0)
+		{
+			cmd_type_len |= E1000_ADVTXD_DCMD_TSE;
+			if (NetPacketIsIpv4(packet))
+				olinfo_status |= E1000_TXD_POPTS_IXSM << 8;
+			olinfo_status |= E1000_TXD_POPTS_TXSM << 8;
+			if (packet->Layout.Layer4Type == NetPacketLayer4TypeTcp)
+				ctxd->mss_l4len_idx |= mss << E1000_ADVTXD_MSS_SHIFT;
+			else
+				ctxd->mss_l4len_idx |= mss << E1000_ADVTXD_MSS_SHIFT;
+		}
+	}*/
+
+	if (tx->ChecksumExtension.Enabled && checksumEnabled)
 	{
 		NET_PACKET_CHECKSUM* checksumInfo = NetExtensionGetPacketChecksum(&tx->ChecksumExtension, packetIndex);
+		if (checksumInfo->Layer3 == NetPacketTxChecksumActionRequired)
+			olinfo_status |= E1000_TXD_POPTS_IXSM << 8;
+		if (checksumInfo->Layer4 == NetPacketTxChecksumActionRequired)
+			olinfo_status |= E1000_TXD_POPTS_TXSM << 8;
+	}
+
+	if ((tx->ChecksumExtension.Enabled && checksumEnabled) || (tx->GsoExtension.Enabled && lsoEnabled))
+	{
 		ctxd->vlan_macip_lens |= packet->Layout.Layer2HeaderLength << E1000_ADVTXD_MACLEN_SHIFT;
 		ctxd->vlan_macip_lens |= packet->Layout.Layer3HeaderLength;
 		ctxd->mss_l4len_idx |= packet->Layout.Layer4HeaderLength << E1000_ADVTXD_L4LEN_SHIFT;
-
-		if (checksumInfo->Layer3 == NetPacketTxChecksumActionRequired)
-		{
-			if (NetPacketIsIpv4(packet))
-				ctxd->type_tucmd_mlhl |= E1000_ADVTXD_TUCMD_IPV4;
-			else if (NetPacketIsIpv6(packet))
-				ctxd->type_tucmd_mlhl |= E1000_ADVTXD_TUCMD_IPV6;
-			olinfo_status |= E1000_TXD_POPTS_IXSM << 8;
-		}
-
-		if (checksumInfo->Layer4 == NetPacketTxChecksumActionRequired)
-		{
-			if (packet->Layout.Layer4Type == NetPacketLayer4TypeTcp)
-				ctxd->type_tucmd_mlhl |= E1000_ADVTXD_TUCMD_L4T_TCP;
-			else if (packet->Layout.Layer4Type == NetPacketLayer4TypeUdp)
-				ctxd->type_tucmd_mlhl |= E1000_ADVTXD_TUCMD_L4T_UDP;
-			olinfo_status |= E1000_TXD_POPTS_TXSM << 8;
-		}
+		if (NetPacketIsIpv4(packet))
+			ctxd->type_tucmd_mlhl |= E1000_ADVTXD_TUCMD_IPV4;
+		else if (NetPacketIsIpv6(packet))
+		    ctxd->type_tucmd_mlhl |= E1000_ADVTXD_TUCMD_IPV6;
+		if (packet->Layout.Layer4Type == NetPacketLayer4TypeTcp)
+			ctxd->type_tucmd_mlhl |= E1000_ADVTXD_TUCMD_L4T_TCP;
+		else if (packet->Layout.Layer4Type == NetPacketLayer4TypeUdp)
+			ctxd->type_tucmd_mlhl |= E1000_ADVTXD_TUCMD_L4T_UDP;
 	}
 
 	tx->TxDescIndex = (tx->TxDescIndex + 1) % tx->NumTxDesc;
+	tcb->NumTxDesc++;
 }
 
 static
@@ -262,7 +289,6 @@ IgbTransmitPackets(
 			if (needContextDescriptor)
 			{
 				IgbPostContextDescriptor(tx, tcb, packet, packetIndex, cmd_type_len, olinfo_status);
-				tcb->NumTxDesc++;
 			}
 
 			fragmentIndex = packet->FragmentIndex;

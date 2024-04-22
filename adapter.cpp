@@ -164,19 +164,36 @@ IgbAdapterSetDatapathCapabilities(
 
 static
 void
+EvtAdapterOffloadSetGso(
+	_In_ NETADAPTER netAdapter,
+	_In_ NETOFFLOAD offload)
+{
+	IGB_ADAPTER* adapter = IgbGetAdapterContext(netAdapter);
+
+	DBGPRINT("EvtAdapterOffloadSetGso IPv4: %d IPV6: %d\n",
+		NetOffloadIsLsoIPv4Enabled(offload),
+		NetOffloadIsLsoIPv6Enabled(offload));
+
+	adapter->LSOv4 = NetOffloadIsLsoIPv4Enabled(offload);
+	adapter->LSOv6 = NetOffloadIsLsoIPv6Enabled(offload);
+}
+
+static
+void
 EvtAdapterOffloadSetTxChecksum(
 	_In_ NETADAPTER netAdapter,
 	_In_ NETOFFLOAD offload)
 {
 	IGB_ADAPTER* adapter = IgbGetAdapterContext(netAdapter);
 
-	/*adapter->TxIpHwChkSum = NetOffloadIsTxChecksumIPv4Enabled(offload);
-	adapter->TxTcpHwChkSum = NetOffloadIsTxChecksumTcpEnabled(offload);
-	adapter->TxUdpHwChkSum = NetOffloadIsTxChecksumUdpEnabled(offload);*/
 	DBGPRINT("EvtAdapterOffloadSetTxChecksum IP: %d TCP: %d UDP: %d\n",
 		NetOffloadIsTxChecksumIPv4Enabled(offload),
 		NetOffloadIsTxChecksumTcpEnabled(offload),
 		NetOffloadIsTxChecksumUdpEnabled(offload));
+
+	adapter->TxIpHwChkSum = NetOffloadIsTxChecksumIPv4Enabled(offload);
+	adapter->TxTcpHwChkSum = NetOffloadIsTxChecksumTcpEnabled(offload);
+	adapter->TxUdpHwChkSum = NetOffloadIsTxChecksumUdpEnabled(offload);
 }
 
 static
@@ -186,19 +203,22 @@ EvtAdapterOffloadSetRxChecksum(
 	_In_ NETOFFLOAD offload)
 {
 	IGB_ADAPTER* adapter = IgbGetAdapterContext(netAdapter);
-	u32 rxcsum = E1000_READ_REG(&adapter->Hw, E1000_RXCSUM);
 
 	DBGPRINT("EvtAdapterOffloadSetRxChecksum IP: %d TCP: %d UDP: %d\n",
 		NetOffloadIsRxChecksumIPv4Enabled(offload),
 		NetOffloadIsRxChecksumTcpEnabled(offload),
 		NetOffloadIsRxChecksumUdpEnabled(offload));
 
+	u32 rxcsum = E1000_READ_REG(&adapter->Hw, E1000_RXCSUM);
 	rxcsum &= ~(E1000_RXCSUM_IPOFL | E1000_RXCSUM_TUOFL);
 	rxcsum |= NetOffloadIsRxChecksumIPv4Enabled(offload) ? E1000_RXCSUM_IPOFL : 0;
 	rxcsum |= NetOffloadIsRxChecksumTcpEnabled(offload) ? E1000_RXCSUM_TUOFL : 0;
-	rxcsum |= NetOffloadIsRxChecksumUdpEnabled(offload) ? E1000_RXCSUM_TUOFL : 0;
-	
+	rxcsum |= NetOffloadIsRxChecksumUdpEnabled(offload) ? E1000_RXCSUM_TUOFL : 0;	
 	E1000_WRITE_REG(&adapter->Hw, E1000_RXCSUM, rxcsum);
+
+	adapter->RxIpHwChkSum = NetOffloadIsRxChecksumIPv4Enabled(offload);
+	adapter->RxTcpHwChkSum = NetOffloadIsRxChecksumTcpEnabled(offload);
+	adapter->RxUdpHwChkSum = NetOffloadIsRxChecksumUdpEnabled(offload);
 }
 
 static
@@ -206,6 +226,21 @@ void
 IgbAdapterSetOffloadCapabilities(
 	_In_ IGB_ADAPTER const* adapter)
 {
+	/*NET_ADAPTER_OFFLOAD_GSO_CAPABILITIES gsoOffloadCapabilities;
+	NET_ADAPTER_OFFLOAD_GSO_CAPABILITIES_INIT(
+		&gsoOffloadCapabilities,
+		NetAdapterOffloadLayer3FlagIPv4NoOptions |
+		NetAdapterOffloadLayer3FlagIPv4WithOptions |
+		NetAdapterOffloadLayer3FlagIPv6NoExtensions |
+		NetAdapterOffloadLayer3FlagIPv6WithExtensions,
+		NetAdapterOffloadLayer4FlagTcpNoOptions |
+		NetAdapterOffloadLayer4FlagTcpWithOptions |
+		NetAdapterOffloadLayer4FlagUdp,
+		240,
+		1,
+		EvtAdapterOffloadSetGso);
+	NetAdapterOffloadSetGsoCapabilities(adapter->NetAdapter, &gsoOffloadCapabilities);*/
+
 	NET_ADAPTER_OFFLOAD_TX_CHECKSUM_CAPABILITIES txChecksumOffloadCapabilities;
 	NET_ADAPTER_OFFLOAD_TX_CHECKSUM_CAPABILITIES_INIT(
 		&txChecksumOffloadCapabilities,
