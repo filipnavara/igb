@@ -127,36 +127,52 @@ RxIndicateReceives(
 
 			packet->Layout.Layer2Type = NetPacketLayer2TypeEthernet;
 			
-			if ((ptype & E1000_RXDADV_PKTTYPE_IPV4) == E1000_RXDADV_PKTTYPE_IPV4)
-				packet->Layout.Layer3Type = NetPacketLayer3TypeIPv4NoOptions;
-			else if ((ptype & E1000_RXDADV_PKTTYPE_IPV4_EX) == E1000_RXDADV_PKTTYPE_IPV4_EX)
-				packet->Layout.Layer3Type = NetPacketLayer3TypeIPv4WithOptions;
-			else if ((ptype & E1000_RXDADV_PKTTYPE_IPV6) == E1000_RXDADV_PKTTYPE_IPV6)
-				packet->Layout.Layer3Type = NetPacketLayer3TypeIPv6NoExtensions;
-			else if ((ptype & E1000_RXDADV_PKTTYPE_IPV6_EX) == E1000_RXDADV_PKTTYPE_IPV6_EX)
-				packet->Layout.Layer3Type = NetPacketLayer3TypeIPv6WithExtensions;
-			else
-				packet->Layout.Layer3Type = NetPacketLayer3TypeUnspecified;
-
-			if ((ptype & E1000_RXDADV_PKTTYPE_TCP) == E1000_RXDADV_PKTTYPE_TCP)
-				packet->Layout.Layer4Type = NetPacketLayer4TypeTcp;
-			else if ((ptype & E1000_RXDADV_PKTTYPE_UDP) == E1000_RXDADV_PKTTYPE_UDP)
-				packet->Layout.Layer4Type = NetPacketLayer4TypeUdp;
-
-			if ((rxd->wb.upper.status_error & E1000_RXD_STAT_IPCS) != 0)
+			if (rx->Adapter->RxIpHwChkSum)
 			{
-				if ((rxd->wb.upper.status_error & E1000_RXDEXT_STATERR_IPE) == 0)
-					checksum->Layer3 = NetPacketRxChecksumEvaluationValid;
+				if ((ptype & E1000_RXDADV_PKTTYPE_IPV4) == E1000_RXDADV_PKTTYPE_IPV4)
+					packet->Layout.Layer3Type = NetPacketLayer3TypeIPv4NoOptions;
+				else if ((ptype & E1000_RXDADV_PKTTYPE_IPV4_EX) == E1000_RXDADV_PKTTYPE_IPV4_EX)
+					packet->Layout.Layer3Type = NetPacketLayer3TypeIPv4WithOptions;
+				else if ((ptype & E1000_RXDADV_PKTTYPE_IPV6) == E1000_RXDADV_PKTTYPE_IPV6)
+					packet->Layout.Layer3Type = NetPacketLayer3TypeIPv6NoExtensions;
+				else if ((ptype & E1000_RXDADV_PKTTYPE_IPV6_EX) == E1000_RXDADV_PKTTYPE_IPV6_EX)
+					packet->Layout.Layer3Type = NetPacketLayer3TypeIPv6WithExtensions;
 				else
-					checksum->Layer3 = NetPacketRxChecksumEvaluationInvalid;
+					packet->Layout.Layer3Type = NetPacketLayer3TypeUnspecified;
+
+				if ((rxd->wb.upper.status_error & E1000_RXD_STAT_IPCS) != 0)
+				{
+					if ((rxd->wb.upper.status_error & E1000_RXDEXT_STATERR_IPE) == 0)
+						checksum->Layer3 = NetPacketRxChecksumEvaluationValid;
+					else
+						checksum->Layer3 = NetPacketRxChecksumEvaluationInvalid;
+				}
 			}
 
-			if ((rxd->wb.upper.status_error & (E1000_RXD_STAT_TCPCS | E1000_RXD_STAT_UDPCS)) != 0)
+			if (rx->Adapter->RxTcpHwChkSum && (ptype & E1000_RXDADV_PKTTYPE_TCP) == E1000_RXDADV_PKTTYPE_TCP)
 			{
-				if ((rxd->wb.upper.status_error & E1000_RXDEXT_STATERR_TCPE) == 0)
-					checksum->Layer4 = NetPacketRxChecksumEvaluationValid;
-				else
-					checksum->Layer4 = NetPacketRxChecksumEvaluationInvalid;
+				packet->Layout.Layer4Type = NetPacketLayer4TypeTcp;
+
+				if ((rxd->wb.upper.status_error & E1000_RXD_STAT_TCPCS) != 0)
+				{
+					if ((rxd->wb.upper.status_error & E1000_RXDEXT_STATERR_TCPE) == 0)
+						checksum->Layer4 = NetPacketRxChecksumEvaluationValid;
+					else
+						checksum->Layer4 = NetPacketRxChecksumEvaluationInvalid;
+				}
+			}
+
+			if (rx->Adapter->RxUdpHwChkSum && (ptype & E1000_RXDADV_PKTTYPE_UDP) == E1000_RXDADV_PKTTYPE_UDP)
+			{
+				packet->Layout.Layer4Type = NetPacketLayer4TypeUdp;
+
+				if ((rxd->wb.upper.status_error & E1000_RXD_STAT_UDPCS) != 0)
+				{
+					if ((rxd->wb.upper.status_error & E1000_RXDEXT_STATERR_TCPE) == 0)
+						checksum->Layer4 = NetPacketRxChecksumEvaluationValid;
+					else
+						checksum->Layer4 = NetPacketRxChecksumEvaluationInvalid;
+				}
 			}
 		}
 
