@@ -56,8 +56,28 @@ EvtAdapterCreateTxQueue(
 		NET_FRAGMENT_EXTENSION_LOGICAL_ADDRESS_NAME,
 		NET_FRAGMENT_EXTENSION_LOGICAL_ADDRESS_VERSION_1,
 		NetExtensionTypeFragment);
-
 	NetTxQueueGetExtension(txQueue, &extension, &tx->LogicalAddressExtension);
+
+	NET_EXTENSION_QUERY_INIT(
+		&extension,
+		NET_PACKET_EXTENSION_IEEE8021Q_NAME,
+		NET_PACKET_EXTENSION_IEEE8021Q_VERSION_1,
+		NetExtensionTypePacket);
+	NetTxQueueGetExtension(txQueue, &extension, &tx->Ieee8021qExtension);
+
+	NET_EXTENSION_QUERY_INIT(
+		&extension,
+		NET_PACKET_EXTENSION_GSO_NAME,
+		NET_PACKET_EXTENSION_GSO_VERSION_1,
+		NetExtensionTypePacket);
+	NetTxQueueGetExtension(txQueue, &extension, &tx->GsoExtension);
+
+	NET_EXTENSION_QUERY_INIT(
+		&extension,
+		NET_PACKET_EXTENSION_CHECKSUM_NAME,
+		NET_PACKET_EXTENSION_CHECKSUM_VERSION_1,
+		NetExtensionTypePacket);
+	NetTxQueueGetExtension(txQueue, &extension, &tx->ChecksumExtension);
 
 	GOTO_IF_NOT_NT_SUCCESS(Exit, status,
 		IgbTxQueueInitialize(txQueue, adapter));
@@ -103,7 +123,7 @@ IgbTxQueueInitialize(
 
 	ULONG txSize;
 	GOTO_IF_NOT_NT_SUCCESS(Exit, status,
-		RtlULongMult(tx->NumTxDesc, sizeof(struct e1000_tx_desc), &txSize));
+		RtlULongMult(tx->NumTxDesc, sizeof(union e1000_adv_tx_desc), &txSize));
 
 	GOTO_IF_NOT_NT_SUCCESS(Exit, status,
 		WdfCommonBufferCreate(
@@ -112,7 +132,7 @@ IgbTxQueueInitialize(
 			WDF_NO_OBJECT_ATTRIBUTES,
 			&tx->TxdArray));
 
-	tx->TxdBase = static_cast<struct e1000_tx_desc*>(
+	tx->TxdBase = static_cast<union e1000_adv_tx_desc*>(
 		WdfCommonBufferGetAlignedVirtualAddress(tx->TxdArray));
 	tx->TxSize = txSize;
 
@@ -131,33 +151,84 @@ GetTcbFromPacket(
 
 static
 void
-IgbPostTxDescriptor(
+IgbPostContextDescriptor(
 	_In_ IGB_TXQUEUE* tx,
-	_In_ IGB_TCB const* tcb,
+	_In_ IGB_TCB* tcb,
 	_In_ NET_PACKET const* packet,
-	_In_ UINT32 packetIndex)
+	_In_ UINT32 packetIndex,
+	_Inout_ u32 &cmd_type_len,
+	_Inout_ u32 &olinfo_status)
 {
-	NET_RING* fr = NetRingCollectionGetFragmentRing(tx->Rings);
-	struct e1000_tx_desc* txd = &tx->TxdBase[tx->TxDescIndex];
+	struct e1000_adv_tx_context_desc* ctxd = (struct e1000_adv_tx_context_desc*)&tx->TxdBase[tx->TxDescIndex];
+	IGB_ADAPTER* adapter = tx->Adapter;
+	bool checksumEnabled = (adapter->TxTcpHwChkSum || adapter->TxIpHwChkSum || adapter->TxUdpHwChkSum);
+	bool lsoEnabled = (adapter->LSOv4 || adapter->LSOv6);
+	bool contextUsed = false;
 
-	// calculate the index in the fragment ring and retrieve
-	// the fragment being posted to populate the hardware descriptor
-	UINT32 const index = (packet->FragmentIndex + tcb->NumTxDesc) & fr->ElementIndexMask;
-	NET_FRAGMENT const* fragment = NetRingGetFragmentAtIndex(fr, index);
-	NET_FRAGMENT_LOGICAL_ADDRESS const* logicalAddress = NetExtensionGetFragmentLogicalAddress(
-		&tx->LogicalAddressExtension, index);
+	RtlZeroMemory(ctxd, sizeof(*ctxd));
+	ctxd->type_tucmd_mlhl = E1000_ADVTXD_DCMD_DEXT | E1000_ADVTXD_DTYP_CTXT;
 
-	RtlZeroMemory(txd, sizeof(*txd));
+	if (tx->Ieee8021qExtension.Enabled)
+	{
+		u16 vlanId = 0;
+		NET_PACKET_IEEE8021Q* ieee8021q = NetExtensionGetPacketIeee8021Q(&tx->Ieee8021qExtension, packetIndex);
+		if (ieee8021q->TxTagging & NetPacketTxIeee8021qActionFlagPriorityRequired)
+			vlanId |= ieee8021q->PriorityCodePoint << 13;
+		if (ieee8021q->TxTagging & NetPacketTxIeee8021qActionFlagVlanRequired)
+			vlanId |= ieee8021q->VlanIdentifier;
 
-	u32 flags = E1000_TXD_CMD_IFCS | E1000_TXD_CMD_RS;
-	txd->buffer_addr = logicalAddress->LogicalAddress + fragment->Offset;
-	if (tcb->NumTxDesc + 1 == packet->FragmentCount)
-		flags |= E1000_TXD_CMD_EOP;
-	txd->lower.data = flags | (u16)fragment->ValidLength;
-	txd->upper.data = 0;
-	MemoryBarrier();
+		// vlanId = ((vlanId >> 8) & 0xff) | ((vlanId << 8) & 0xff00); -- Do we need to flip bytes?
+		ctxd->vlan_macip_lens |= vlanId << E1000_ADVTXD_VLAN_SHIFT;
+		cmd_type_len |= E1000_ADVTXD_DCMD_VLE;
+		contextUsed = true;
+	}
 
-	tx->TxDescIndex = (tx->TxDescIndex + 1) % tx->NumTxDesc;
+	if (tx->GsoExtension.Enabled && lsoEnabled)
+	{
+		NET_PACKET_GSO* gsoInfo = NetExtensionGetPacketGso(&tx->GsoExtension, packetIndex);
+		UINT32 mss = packet->Layout.Layer4Type == NetPacketLayer4TypeTcp ? gsoInfo->TCP.Mss : gsoInfo->UDP.Mss;
+
+		if (mss > 0)
+		{
+			cmd_type_len |= E1000_ADVTXD_DCMD_TSE;
+			if (NetPacketIsIpv4(packet))
+				olinfo_status |= E1000_TXD_POPTS_IXSM << 8;
+			olinfo_status |= E1000_TXD_POPTS_TXSM << 8;
+			ctxd->mss_l4len_idx |= mss << E1000_ADVTXD_MSS_SHIFT;
+		}
+	}
+
+	if (tx->ChecksumExtension.Enabled && checksumEnabled)
+	{
+		NET_PACKET_CHECKSUM* checksumInfo = NetExtensionGetPacketChecksum(&tx->ChecksumExtension, packetIndex);
+		if (checksumInfo->Layer3 == NetPacketTxChecksumActionRequired)
+			olinfo_status |= E1000_TXD_POPTS_IXSM << 8;
+		if (checksumInfo->Layer4 == NetPacketTxChecksumActionRequired)
+			olinfo_status |= E1000_TXD_POPTS_TXSM << 8;
+	}
+
+	if ((tx->ChecksumExtension.Enabled && checksumEnabled) || (tx->GsoExtension.Enabled && lsoEnabled))
+	{
+		ctxd->vlan_macip_lens |= packet->Layout.Layer2HeaderLength << E1000_ADVTXD_MACLEN_SHIFT;
+		ctxd->vlan_macip_lens |= packet->Layout.Layer3HeaderLength;
+		ctxd->mss_l4len_idx |= packet->Layout.Layer4HeaderLength << E1000_ADVTXD_L4LEN_SHIFT;
+		if (NetPacketIsIpv4(packet))
+			ctxd->type_tucmd_mlhl |= E1000_ADVTXD_TUCMD_IPV4;
+		else if (NetPacketIsIpv6(packet))
+		    ctxd->type_tucmd_mlhl |= E1000_ADVTXD_TUCMD_IPV6;
+		if (packet->Layout.Layer4Type == NetPacketLayer4TypeTcp)
+			ctxd->type_tucmd_mlhl |= E1000_ADVTXD_TUCMD_L4T_TCP;
+		else if (packet->Layout.Layer4Type == NetPacketLayer4TypeUdp)
+			ctxd->type_tucmd_mlhl |= E1000_ADVTXD_TUCMD_L4T_UDP;
+
+		contextUsed = true;
+	}
+
+	if (contextUsed)
+	{
+		tx->TxDescIndex = (tx->TxDescIndex + 1) % tx->NumTxDesc;
+		tcb->NumTxDesc++;
+	}
 }
 
 static
@@ -176,8 +247,8 @@ IgbIsPacketTransferComplete(
 	_In_ IGB_TCB* tcb)
 {
 	size_t lastTxDescIdx = (tcb->FirstTxDescIdx + tcb->NumTxDesc - 1) % tx->NumTxDesc;
-	struct e1000_tx_desc* txd = &tx->TxdBase[lastTxDescIdx];
-	return (txd->upper.data & E1000_TXD_STAT_DD) != 0;
+	union e1000_adv_tx_desc* txd = &tx->TxdBase[lastTxDescIdx];
+	return (txd->wb.status & E1000_TXD_STAT_DD) != 0;
 }
 
 static
@@ -204,22 +275,53 @@ IgbTransmitPackets(
 		if (!packet->Ignore)
 		{
 			// Bail out if there are not enough TX descriptors to describe the
-			// whole packet.
-			if (packet->FragmentCount > availableDescriptors)
+			// whole packet. We reserve a space for one extra context descriptor
+			// even if it's not always used.
+			if (packet->FragmentCount + 1 > availableDescriptors)
 			{
 				break;
 			}
 
 			IGB_TCB* tcb = GetTcbFromPacket(tx, packetIndex);
+			u32 cmd_type_len = E1000_ADVTXD_DCMD_DEXT | E1000_ADVTXD_DTYP_DATA | E1000_ADVTXD_DCMD_IFCS;
+			u32 olinfo_status = 0;
+			u32 packet_length = 0;
+
 			tcb->FirstTxDescIdx = tx->TxDescIndex;
+			tcb->NumTxDesc = 0;
+
+			IgbPostContextDescriptor(tx, tcb, packet, packetIndex, cmd_type_len, olinfo_status);
 
 			fragmentIndex = packet->FragmentIndex;
-			fragmentEndIndex = NetRingIncrementIndex(fragmentRing, fragmentIndex + packet->FragmentCount - 1);
-			for (tcb->NumTxDesc = 0; fragmentIndex != fragmentEndIndex; tcb->NumTxDesc++)
+			fragmentEndIndex = NetRingAdvanceIndex(fragmentRing, fragmentIndex, packet->FragmentCount);
+
+			// Calculate the full packet length
+			for (int i = 0; fragmentIndex != fragmentEndIndex; i++)
 			{
-				IgbPostTxDescriptor(tx, tcb, packet, packetIndex);
+				NET_FRAGMENT const* fragment = NetRingGetFragmentAtIndex(fragmentRing, fragmentIndex);
+				packet_length += (u16)fragment->ValidLength;
 				fragmentIndex = NetRingIncrementIndex(fragmentRing, fragmentIndex);
 			}
+			olinfo_status |= packet_length << E1000_ADVTXD_PAYLEN_SHIFT;
+
+			fragmentIndex = packet->FragmentIndex;
+			union e1000_adv_tx_desc* lastTxd = 0;
+			for (; fragmentIndex != fragmentEndIndex; tcb->NumTxDesc++)
+			{
+				NET_FRAGMENT const* fragment = NetRingGetFragmentAtIndex(fragmentRing, fragmentIndex);
+				union e1000_adv_tx_desc* txd = lastTxd = &tx->TxdBase[tx->TxDescIndex];
+				NET_FRAGMENT_LOGICAL_ADDRESS const* logicalAddress = NetExtensionGetFragmentLogicalAddress(
+					&tx->LogicalAddressExtension, fragmentIndex);
+
+				RtlZeroMemory(txd, sizeof(*txd));
+				txd->read.buffer_addr = logicalAddress->LogicalAddress + fragment->Offset;
+				txd->read.cmd_type_len = cmd_type_len | (u16)fragment->ValidLength;
+				txd->read.olinfo_status = olinfo_status;
+				tx->TxDescIndex = (tx->TxDescIndex + 1) % tx->NumTxDesc;
+
+				fragmentIndex = NetRingIncrementIndex(fragmentRing, fragmentIndex);
+			}
+			lastTxd->read.cmd_type_len |= E1000_ADVTXD_DCMD_EOP | E1000_ADVTXD_DCMD_RS;
 			fragmentRing->NextIndex = fragmentIndex;
 
 			programmedPackets = true;
@@ -371,11 +473,6 @@ EvtTxQueueStop(
 
 	WdfSpinLockAcquire(tx->Adapter->Lock);
 
-	// Disable the queue
-	u32 txdctl = E1000_READ_REG(hw, E1000_TXDCTL(tx->QueueId));
-	txdctl &= ~E1000_TXDCTL_QUEUE_ENABLE;
-	E1000_WRITE_REG(hw, E1000_TXDCTL(tx->QueueId), txdctl);
-
 	IgbTxQueueSetInterrupt(tx, false);
 
 	tx->Adapter->TxQueues[tx->QueueId] = WDF_NO_HANDLE;
@@ -418,6 +515,14 @@ EvtTxQueueCancel(
 	DBGPRINT("EvtTxQueueCancel\n");
 
 	IGB_TXQUEUE* tx = IgbGetTxQueueContext(txQueue);
+	struct e1000_hw* hw = &tx->Adapter->Hw;
 
-	// TODO
+	WdfSpinLockAcquire(tx->Adapter->Lock);
+
+	// Disable the queue
+	u32 txdctl = E1000_READ_REG(hw, E1000_TXDCTL(tx->QueueId));
+	txdctl &= ~E1000_TXDCTL_QUEUE_ENABLE;
+	E1000_WRITE_REG(hw, E1000_TXDCTL(tx->QueueId), txdctl);
+
+	WdfSpinLockRelease(tx->Adapter->Lock);
 }

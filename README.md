@@ -13,9 +13,9 @@ Thanks to *CoolStar* for writing open source [RealTek driver](https://github.com
 ## TODO
 
 - [ ] Efficient MSI/MSI-X interrupt handling
-- [ ] Offloading
-  - [ ] Checksums
-  - [ ] Large send offload
+- [x] Offloading
+  - [x] Checksums
+  - [x] Large send offload
 - [ ] Energy Efficient Ethernet
 - [ ] RSS
 - [ ] Enable support for more NIC models

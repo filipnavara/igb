@@ -8,16 +8,18 @@ typedef struct _IGB_RXQUEUE {
 
 	// descriptor information
 	WDFCOMMONBUFFER RxdArray;
-	struct e1000_rx_desc* RxdBase;
+	union e1000_adv_rx_desc* RxdBase;
 	size_t RxdSize;
 
 	USHORT NumRxDesc;
 
 	NET_EXTENSION LogicalAddressExtension;
-	/*NET_EXTENSION ChecksumExtension;
+	NET_EXTENSION ChecksumExtension;
+	NET_EXTENSION Ieee8021qExtension;
+	/*
 	NET_EXTENSION VirtualAddressExtension;
 	NET_EXTENSION HashValueExtension;
-	NET_EXTENSION Ieee8021qExtension;*/
+	*/
 
 	ULONG QueueId;
 } IGB_RXQUEUE, *PIGB_RXQUEUE;

@@ -19,17 +19,16 @@ typedef struct _IGB_TXQUEUE {
 
 	// descriptor information
 	WDFCOMMONBUFFER TxdArray;
-	struct e1000_tx_desc* TxdBase;
+	union e1000_adv_tx_desc* TxdBase;
 	size_t TxSize;
 
 	USHORT NumTxDesc;
 	USHORT TxDescIndex;
 
-	//NET_EXTENSION ChecksumExtension;
-	//NET_EXTENSION GsoExtension;
-	//NET_EXTENSION VirtualAddressExtension;
 	NET_EXTENSION LogicalAddressExtension;
-	//NET_EXTENSION Ieee8021qExtension;
+	NET_EXTENSION Ieee8021qExtension;
+	NET_EXTENSION GsoExtension;
+	NET_EXTENSION ChecksumExtension;
 
 	ULONG QueueId;
 	UINT8 Priority;

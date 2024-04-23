@@ -45,9 +45,9 @@ AddReg                  = ndi.reg
 AddReg                  = NetworkAddress.kw
 ;AddReg                  = VlanID.kw
 ;AddReg                  = FlowControl.kw
-;AddReg                  = OffloadChecksum.kw
-;AddReg                  = PriorityVlanTag.kw
-;AddReg                  = LSO.kw
+AddReg                  = OffloadChecksum.kw
+AddReg                  = PriorityVlanTag.kw
+AddReg                  = LSO.kw
 
 [ndi.reg]
 ; TODO: Update these if your device is not Ethernet.

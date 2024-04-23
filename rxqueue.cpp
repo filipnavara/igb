@@ -50,8 +50,21 @@ EvtAdapterCreateRxQueue(
 		NET_FRAGMENT_EXTENSION_LOGICAL_ADDRESS_NAME,
 		NET_FRAGMENT_EXTENSION_LOGICAL_ADDRESS_VERSION_1,
 		NetExtensionTypeFragment);
-
 	NetRxQueueGetExtension(rxQueue, &extension, &rx->LogicalAddressExtension);
+
+	NET_EXTENSION_QUERY_INIT(
+		&extension,
+		NET_PACKET_EXTENSION_CHECKSUM_NAME,
+		NET_PACKET_EXTENSION_CHECKSUM_VERSION_1,
+		NetExtensionTypePacket);
+	NetRxQueueGetExtension(rxQueue, &extension, &rx->ChecksumExtension);
+
+	NET_EXTENSION_QUERY_INIT(
+		&extension,
+		NET_PACKET_EXTENSION_IEEE8021Q_NAME,
+		NET_PACKET_EXTENSION_IEEE8021Q_VERSION_1,
+		NetExtensionTypePacket);
+	NetRxQueueGetExtension(rxQueue, &extension, &rx->Ieee8021qExtension);
 
 	GOTO_IF_NOT_NT_SUCCESS(Exit, status,
 		IgbRxQueueInitialize(rxQueue, adapter));
@@ -75,9 +88,9 @@ RxIndicateReceives(
 	{
 		UINT32 const fragmentIndex = fr->BeginIndex;
 
-		struct e1000_rx_desc const* rxd = &rx->RxdBase[fragmentIndex];
+		union e1000_adv_rx_desc const* rxd = &rx->RxdBase[fragmentIndex];
 
-		if ((rxd->status & E1000_RXD_STAT_DD) == 0)
+		if ((rxd->wb.upper.status_error & E1000_RXD_STAT_DD) == 0)
 			break;
 		if (pr->BeginIndex == pr->EndIndex)
 			break;
@@ -86,7 +99,7 @@ RxIndicateReceives(
 		NT_FRE_ASSERT(fr->BeginIndex != fr->EndIndex);
 
 		NET_FRAGMENT* fragment = NetRingGetFragmentAtIndex(fr, fragmentIndex);
-		fragment->ValidLength = rxd->length; // (rxd->so0.Frame_Length - ETHER_CRC_LEN);
+		fragment->ValidLength = rxd->wb.upper.length;
 		fragment->Capacity = fragment->ValidLength;
 		fragment->Offset = 0;
 
@@ -95,6 +108,73 @@ RxIndicateReceives(
 		NET_PACKET* packet = NetRingGetPacketAtIndex(pr, packetIndex);
 		packet->FragmentIndex = fragmentIndex;
 		packet->FragmentCount = 1;
+
+		if (rx->Ieee8021qExtension.Enabled)
+		{
+			NET_PACKET_IEEE8021Q* ieee8021q = NetExtensionGetPacketIeee8021Q(&rx->Ieee8021qExtension, packetIndex);
+			if ((rxd->wb.upper.status_error & E1000_RXD_STAT_VP) == 0)
+			{
+				u16 vlanId = rxd->wb.upper.vlan;
+				ieee8021q->PriorityCodePoint = vlanId >> 13;
+				ieee8021q->VlanIdentifier = vlanId & 0xfff;
+			}
+		}
+
+		if (rx->ChecksumExtension.Enabled)
+		{
+			NET_PACKET_CHECKSUM* checksum = NetExtensionGetPacketChecksum(&rx->ChecksumExtension, packetIndex);
+			u32 ptype = rxd->wb.lower.lo_dword.data & (E1000_RXDADV_PKTTYPE_ILMASK | E1000_RXDADV_PKTTYPE_TLMASK);
+
+			packet->Layout.Layer2Type = NetPacketLayer2TypeEthernet;
+			
+			if (rx->Adapter->RxIpHwChkSum)
+			{
+				if ((ptype & E1000_RXDADV_PKTTYPE_IPV4) == E1000_RXDADV_PKTTYPE_IPV4)
+					packet->Layout.Layer3Type = NetPacketLayer3TypeIPv4NoOptions;
+				else if ((ptype & E1000_RXDADV_PKTTYPE_IPV4_EX) == E1000_RXDADV_PKTTYPE_IPV4_EX)
+					packet->Layout.Layer3Type = NetPacketLayer3TypeIPv4WithOptions;
+				else if ((ptype & E1000_RXDADV_PKTTYPE_IPV6) == E1000_RXDADV_PKTTYPE_IPV6)
+					packet->Layout.Layer3Type = NetPacketLayer3TypeIPv6NoExtensions;
+				else if ((ptype & E1000_RXDADV_PKTTYPE_IPV6_EX) == E1000_RXDADV_PKTTYPE_IPV6_EX)
+					packet->Layout.Layer3Type = NetPacketLayer3TypeIPv6WithExtensions;
+				else
+					packet->Layout.Layer3Type = NetPacketLayer3TypeUnspecified;
+
+				if ((rxd->wb.upper.status_error & E1000_RXD_STAT_IPCS) != 0)
+				{
+					if ((rxd->wb.upper.status_error & E1000_RXDEXT_STATERR_IPE) == 0)
+						checksum->Layer3 = NetPacketRxChecksumEvaluationValid;
+					else
+						checksum->Layer3 = NetPacketRxChecksumEvaluationInvalid;
+				}
+			}
+
+			if (rx->Adapter->RxTcpHwChkSum && (ptype & E1000_RXDADV_PKTTYPE_TCP) == E1000_RXDADV_PKTTYPE_TCP)
+			{
+				packet->Layout.Layer4Type = NetPacketLayer4TypeTcp;
+
+				if ((rxd->wb.upper.status_error & E1000_RXD_STAT_TCPCS) != 0)
+				{
+					if ((rxd->wb.upper.status_error & E1000_RXDEXT_STATERR_TCPE) == 0)
+						checksum->Layer4 = NetPacketRxChecksumEvaluationValid;
+					else
+						checksum->Layer4 = NetPacketRxChecksumEvaluationInvalid;
+				}
+			}
+
+			if (rx->Adapter->RxUdpHwChkSum && (ptype & E1000_RXDADV_PKTTYPE_UDP) == E1000_RXDADV_PKTTYPE_UDP)
+			{
+				packet->Layout.Layer4Type = NetPacketLayer4TypeUdp;
+
+				if ((rxd->wb.upper.status_error & E1000_RXD_STAT_UDPCS) != 0)
+				{
+					if ((rxd->wb.upper.status_error & E1000_RXDEXT_STATERR_TCPE) == 0)
+						checksum->Layer4 = NetPacketRxChecksumEvaluationValid;
+					else
+						checksum->Layer4 = NetPacketRxChecksumEvaluationInvalid;
+				}
+			}
+		}
 
 		packet->Layout.Layer2Type = NetPacketLayer2TypeEthernet;
 
@@ -106,13 +186,12 @@ RxIndicateReceives(
 static
 void
 IgbPostRxDescriptor(
-	_In_ struct e1000_rx_desc* desc,
+	_In_ union e1000_adv_rx_desc* desc,
 	_In_ NET_FRAGMENT_LOGICAL_ADDRESS const* logicalAddress)
 {
 	RtlZeroMemory(desc, sizeof(*desc));
-	desc->buffer_addr = logicalAddress->LogicalAddress;
-	desc->status = 0;
-	desc->length = 0;
+	desc->read.pkt_addr = logicalAddress->LogicalAddress;
+	desc->read.hdr_addr = 0;
 	MemoryBarrier();
 }
 
@@ -160,9 +239,9 @@ IgbRxQueueInitialize(
 
 	ULONG rxSize;
 	GOTO_IF_NOT_NT_SUCCESS(Exit, status,
-		RtlULongMult(rx->NumRxDesc, sizeof(struct e1000_rx_desc), &rxSize));
+		RtlULongMult(rx->NumRxDesc, sizeof(union e1000_adv_rx_desc), &rxSize));
 
-	UINT32 const rxdSize = pr->NumberOfElements * sizeof(struct e1000_rx_desc);
+	UINT32 const rxdSize = pr->NumberOfElements * sizeof(union e1000_adv_rx_desc);
 	GOTO_IF_NOT_NT_SUCCESS(Exit, status,
 		WdfCommonBufferCreate(
 			rx->Adapter->DmaEnabler,
@@ -170,7 +249,7 @@ IgbRxQueueInitialize(
 			WDF_NO_OBJECT_ATTRIBUTES,
 			&rx->RxdArray));
 
-	rx->RxdBase = static_cast<struct e1000_rx_desc*>(WdfCommonBufferGetAlignedVirtualAddress(rx->RxdArray));
+	rx->RxdBase = static_cast<union e1000_adv_rx_desc*>(WdfCommonBufferGetAlignedVirtualAddress(rx->RxdArray));
 	rx->RxdSize = rxdSize;
 
 Exit:
@@ -222,8 +301,9 @@ EvtRxQueueStart(
 	u32 rctl = E1000_READ_REG(hw, E1000_RCTL);
 	E1000_WRITE_REG(hw, E1000_RCTL, rctl & ~E1000_RCTL_EN);
 
-	srrctl = 0;// E1000_SRRCTL_DESCTYPE_ADV_ONEBUF;
-	//srrctl |= 2048 >> E1000_SRRCTL_BSIZEPKT_SHIFT;
+	// Use advanced descriptor format without header split/replication
+	srrctl = E1000_SRRCTL_DESCTYPE_ADV_ONEBUF;
+
 	rctl &= ~E1000_RCTL_LPE;
 	rctl |= E1000_RCTL_SZ_2048;
 
@@ -277,16 +357,10 @@ EvtRxQueueStop(
 {
 	DBGPRINT("EvtRxQueueStop\n");
 	IGB_RXQUEUE* rx = IgbGetRxQueueContext(rxQueue);
-	struct e1000_hw* hw = &rx->Adapter->Hw;
 
 	ASSERT(rx->QueueId < IGB_MAX_RX_QUEUES);
 
 	WdfSpinLockAcquire(rx->Adapter->Lock);
-
-	// Disable the queue
-	u32 rxdctl = E1000_READ_REG(hw, E1000_RXDCTL(rx->QueueId));
-	rxdctl &= ~E1000_RXDCTL_QUEUE_ENABLE;
-	E1000_WRITE_REG(hw, E1000_RXDCTL(rx->QueueId), rxdctl);
 
 	IgbRxQueueSetInterrupt(rx, false);
 	rx->Adapter->RxQueues[rx->QueueId] = WDF_NO_HANDLE;
@@ -338,11 +412,14 @@ EvtRxQueueCancel(
 	DBGPRINT("EvtRxQueueCancel\n");
 
 	IGB_RXQUEUE* rx = IgbGetRxQueueContext(rxQueue);
+	struct e1000_hw* hw = &rx->Adapter->Hw;
 
 	WdfSpinLockAcquire(rx->Adapter->Lock);
 
-	// FIXME
-	//re_stop(&rx->Adapter->bsdData);
+	// Disable the queue
+	u32 rxdctl = E1000_READ_REG(hw, E1000_RXDCTL(rx->QueueId));
+	rxdctl &= ~E1000_RXDCTL_QUEUE_ENABLE;
+	E1000_WRITE_REG(hw, E1000_RXDCTL(rx->QueueId), rxdctl);
 
 	WdfSpinLockRelease(rx->Adapter->Lock);
 
@@ -350,6 +427,8 @@ EvtRxQueueCancel(
 	// indicated during rx disable. advance will continue to be called
 	// after cancel until all packets are returned to the framework.
 	RxIndicateReceives(rx);
+
+	DBGPRINT("EvtRxQueueCancel - in the middle\n");
 
 	NET_RING* pr = NetRingCollectionGetPacketRing(rx->Rings);
 
@@ -364,4 +443,6 @@ EvtRxQueueCancel(
 	NET_RING* fr = NetRingCollectionGetFragmentRing(rx->Rings);
 
 	fr->BeginIndex = fr->EndIndex;
+
+	DBGPRINT("EvtRxQueueCancel - done\n");
 }
