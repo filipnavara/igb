@@ -346,8 +346,6 @@ EvtRxQueueStart(
 	// Heads & tails?
 	E1000_WRITE_REG(hw, E1000_RDH(rx->QueueId), 0);
 	E1000_WRITE_REG(hw, E1000_RDT(rx->QueueId), rx->NumRxDesc - 1);
-
-	IgbFirstStart(adapter);
 }
 
 _Use_decl_annotations_
