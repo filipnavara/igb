@@ -455,8 +455,6 @@ EvtTxQueueStart(
 
 	// This write will effectively turn on the transmit unit.
 	E1000_WRITE_REG(hw, E1000_TCTL, tctl);
-
-	IgbFirstStart(adapter);
 }
 
 _Use_decl_annotations_

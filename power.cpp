@@ -14,7 +14,7 @@ EvtDeviceD0Entry(
 {
     IGB_ADAPTER* adapter = IgbGetDeviceContext(wdfDevice)->Adapter;
 
-    IgbFirstStart(adapter);
+    IgbResetLink(adapter);
 
     return STATUS_SUCCESS;
 }

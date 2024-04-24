@@ -22,10 +22,8 @@ void IgbResetLink(_In_ IGB_ADAPTER* adapter)
 
 	// Clears any pending interrupts
 	E1000_READ_REG(&adapter->Hw, E1000_ICR);
-
-	// Enable interrupts
+	// Enable link interrupts
 	E1000_WRITE_REG(&adapter->Hw, E1000_IMS, E1000_IMS_LSC);
-	E1000_WRITE_REG(&adapter->Hw, E1000_ICS, E1000_ICS_LSC);
 	E1000_WRITE_FLUSH(&adapter->Hw);
 
 	E1000_WRITE_REG(&adapter->Hw, E1000_VET, /*ETHERTYPE_VLAN*/0x8100);
@@ -34,18 +32,6 @@ void IgbResetLink(_In_ IGB_ADAPTER* adapter)
 	WdfInterruptReleaseLock(adapter->Interrupt->Handle);
 
 	IgbCheckLinkStatus(adapter);
-}
-
-void IgbFirstStart(_In_ IGB_ADAPTER* adapter)
-{
-	DBGPRINT("IntelFirstStart\n");
-
-	if (adapter->RxQueues[0] == NULL || adapter->TxQueues[0] == NULL)
-	{
-		return;
-	}
-
-	IgbResetLink(adapter);
 }
 
 void IgbCheckLinkStatus(_In_ IGB_ADAPTER* adapter)
