@@ -5,7 +5,7 @@
 #include "trace.h"
 #include "device.h"
 #include "adapter.h"
-//#include "configuration.h"
+#include "interrupt.h"
 #include "link.h"
 
 NTSTATUS
@@ -20,6 +20,7 @@ IgbGetResources(
 
 	ULONG errorCode = 0;
 	ULONG memRegCnt = 0;
+	ULONG intCnt = 0;
 
 	// According to https://msdn.microsoft.com/windows/hardware/drivers/wdf/raw-and-translated-resources
 	// "Both versions represent the same set of hardware resources, in the same order."
@@ -44,9 +45,26 @@ IgbGetResources(
 
 			memRegCnt++;
 		}
+		else if (rawDescriptor->Type == CmResourceTypeInterrupt)
+		{
+			/*if (translatedDescriptor->Flags & CM_RESOURCE_INTERRUPT_MESSAGE)
+			{
+				DBGPRINT("MSI/MSI-X interrupt %d\n", rawDescriptor->u.MessageInterrupt.Raw.MessageCount);
+			}
+			else
+			{
+				DBGPRINT("LBI interrupt\n");
+			}*/
+			if (intCnt == 0)
+			{
+				GOTO_IF_NOT_NT_SUCCESS(Exit, status,
+					IgbInterruptCreate(adapter->WdfDevice, adapter, rawDescriptor, translatedDescriptor, &adapter->Interrupt));
+			}
+			intCnt++;
+		}
 	}
 
-	if (!adapter->MMIOAddress)
+	if (!adapter->MMIOAddress || intCnt == 0)
 	{
 		status = STATUS_RESOURCE_TYPE_NOT_FOUND;
 		errorCode = NDIS_ERROR_CODE_RESOURCE_CONFLICT;

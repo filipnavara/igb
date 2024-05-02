@@ -7,8 +7,8 @@
 #include "interrupt.h"
 #include "link.h"
 
-#undef DBGPRINT
-#define DBGPRINT(...)
+//#define DBGPRINT_ADVANCE DBGPRINT
+#define DBGPRINT_ADVANCE(...)
 
 _Use_decl_annotations_
 NTSTATUS
@@ -372,14 +372,14 @@ void
 EvtTxQueueAdvance(
 	_In_ NETPACKETQUEUE txQueue)
 {
-	DBGPRINT("EvtTxQueueAdvance\n");
+	DBGPRINT_ADVANCE("EvtTxQueueAdvance\n");
 
 	IGB_TXQUEUE* tx = IgbGetTxQueueContext(txQueue);
 
 	IgbTransmitPackets(tx);
 	IgbCompleteTransmitPackets(tx);
 
-	DBGPRINT("EvtTxQueueAdvance - Done\n");
+	DBGPRINT_ADVANCE("EvtTxQueueAdvance - Done\n");
 }
 
 void
@@ -387,7 +387,7 @@ IgbTxQueueSetInterrupt(
 	_In_ IGB_TXQUEUE* tx,
 	_In_ BOOLEAN notificationEnabled)
 {
-	InterlockedExchange(&tx->Interrupt->TxNotifyArmed, notificationEnabled);
+	InterlockedExchange(&tx->Interrupt->TxNotifyArmed[tx->QueueId], notificationEnabled);
 
 	WdfInterruptAcquireLock(tx->Interrupt->Handle);
 	E1000_WRITE_REG(&tx->Adapter->Hw, notificationEnabled ? E1000_IMS : E1000_IMC, E1000_IMS_TXDW);
@@ -498,8 +498,7 @@ EvtTxQueueSetNotificationEnabled(
 	_In_ NETPACKETQUEUE txQueue,
 	_In_ BOOLEAN notificationEnabled)
 {
-	//TraceEntry(TraceLoggingPointer(txQueue), TraceLoggingBoolean(notificationEnabled));
-	DBGPRINT("EvtTxQueueSetNotificationEnabled\n");
+	DBGPRINT_ADVANCE("EvtTxQueueSetNotificationEnabled\n");
 
 	IGB_TXQUEUE* tx = IgbGetTxQueueContext(txQueue);
 	IgbTxQueueSetInterrupt(tx, notificationEnabled);
@@ -523,4 +522,18 @@ EvtTxQueueCancel(
 	E1000_WRITE_REG(hw, E1000_TXDCTL(tx->QueueId), txdctl);
 
 	WdfSpinLockRelease(tx->Adapter->Lock);
+
+	NET_RING* pr = NetRingCollectionGetPacketRing(tx->Rings);
+
+	while (pr->BeginIndex != pr->EndIndex)
+	{
+		NET_PACKET* packet = NetRingGetPacketAtIndex(pr, pr->BeginIndex);
+		packet->Ignore = 1;
+
+		pr->BeginIndex = NetRingIncrementIndex(pr, pr->BeginIndex);
+	}
+
+	NET_RING* fr = NetRingCollectionGetFragmentRing(tx->Rings);
+
+	fr->BeginIndex = fr->EndIndex;
 }

@@ -2,7 +2,7 @@
 
 typedef struct _IGB_RXQUEUE {
 	IGB_ADAPTER* Adapter;
-	IGB_INTERRUPT* Interrupt;
+	WDFINTERRUPT InterruptHandle;
 
 	NET_RING_COLLECTION const* Rings;
 

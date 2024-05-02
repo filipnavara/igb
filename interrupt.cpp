@@ -8,6 +8,8 @@ NTSTATUS
 IgbInterruptCreate(
 	_In_ WDFDEVICE wdfDevice,
 	_In_ IGB_ADAPTER* adapter,
+	_In_ PCM_PARTIAL_RESOURCE_DESCRIPTOR rawDescriptor,
+	_In_ PCM_PARTIAL_RESOURCE_DESCRIPTOR translatedDescriptor,
 	_Out_ IGB_INTERRUPT** interrupt)
 {
 	DBGPRINT("IntelInterruptCreate");
@@ -20,19 +22,57 @@ IgbInterruptCreate(
 	WDF_INTERRUPT_CONFIG config;
 	WDF_INTERRUPT_CONFIG_INIT(&config, EvtInterruptIsr, EvtInterruptDpc);
 
+	config.InterruptRaw = rawDescriptor;
+	config.InterruptTranslated = translatedDescriptor;
+
 	NTSTATUS status = STATUS_SUCCESS;
 
 	WDFINTERRUPT wdfInterrupt;
 	GOTO_IF_NOT_NT_SUCCESS(Exit, status,
 		WdfInterruptCreate(wdfDevice, &config, &attributes, &wdfInterrupt));
 
-	*interrupt = IgbGetInterruptContext(wdfInterrupt);
-
-	(*interrupt)->Adapter = adapter;
-	(*interrupt)->Handle = wdfInterrupt;
+	IGB_INTERRUPT* context = IgbGetInterruptContext(wdfInterrupt);
+	context->Adapter = adapter;
+	context->Handle = wdfInterrupt;
+	context->IsMsi = translatedDescriptor->Flags & CM_RESOURCE_INTERRUPT_MESSAGE ? TRUE : FALSE;
+	*interrupt = context;
 
 Exit:
 	return status;
+}
+
+void
+IgbInterruptInitialize(
+	_In_ IGB_INTERRUPT* interrupt)
+{
+	// Map RX queues to EICR bits
+	// TODO: Handle 82575/82576 models
+	for (int i = 0; i < IGB_MAX_RX_QUEUES; i++)
+	{
+		u32 index = i >> 1;
+		u32 ivar = E1000_READ_REG_ARRAY(&interrupt->Adapter->Hw, E1000_IVAR0, index);
+		if (i & 1)
+		{
+			ivar &= 0xFF00FFFF;
+			ivar |= (i | E1000_IVAR_VALID) << 16;
+		}
+		else
+		{
+			ivar &= 0xFFFFFF00;
+			ivar |= i | E1000_IVAR_VALID;
+		}
+		E1000_WRITE_REG_ARRAY(&interrupt->Adapter->Hw, E1000_IVAR0, index, ivar);
+	}
+
+	// TODO: MSI-X
+	if (interrupt->IsMsi)
+	{
+		E1000_WRITE_REG(&interrupt->Adapter->Hw, E1000_GPIE, E1000_GPIE_NSICR);
+	}
+	else
+	{
+		E1000_WRITE_REG(&interrupt->Adapter->Hw, E1000_GPIE, 0);
+	}
 }
 
 _Use_decl_annotations_
@@ -46,68 +86,32 @@ EvtInterruptIsr(
 	IGB_INTERRUPT* interrupt = IgbGetInterruptContext(wdfInterrupt);
 	IGB_ADAPTER* adapter = interrupt->Adapter;
 	struct e1000_hw* hw = &adapter->Hw;
-	u32 reg_icr;
+	u32 icr, eicr;
 	BOOLEAN queueDPC = FALSE;
 
-	reg_icr = E1000_READ_REG(hw, E1000_ICR);
+	eicr = E1000_READ_REG(hw, E1000_EICR);
 
 	// Hot eject
-	if (reg_icr == 0xffffffff)
+	if (eicr == 0xffffffff)
 	{
 		return TRUE;
 	}
 
-	// Stray interrupts
-	if (reg_icr == 0x0 || (reg_icr & E1000_ICR_INT_ASSERTED) == 0)
+	if (eicr != 0)
 	{
-		return TRUE;
-	}
+		InterlockedOr(&interrupt->EICR, eicr);
 
-	if ((reg_icr & (E1000_ICR_FER | E1000_ICR_DOUTSYNC | E1000_ICR_DRSTA | E1000_ICR_ECCER | E1000_ICR_THS)) &&
-		!InterlockedExchange8(&interrupt->PciInterrupt, TRUE))
-	{
+		if ((eicr & E1000_EICR_OTHER) != 0)
+		{
+			icr = E1000_READ_REG(hw, E1000_ICR);
+			InterlockedOr(&interrupt->ICR, icr);
+		}
+
 		WdfInterruptQueueDpcForIsr(wdfInterrupt);
 		return TRUE;
 	}
 
-	/* Rx interrupt */
-	if ((reg_icr & (E1000_ICR_RXSEQ | E1000_ICR_RXDMT0 | E1000_ICR_RXO | E1000_ICR_RXT0 | E1000_ICR_RXCFG)) &&
-		!InterlockedExchange8(&interrupt->RxInterrupt, TRUE))
-	{
-		queueDPC = TRUE;
-	}
-
-	/* Tx interrupt */
-	if ((reg_icr & (E1000_ICR_TXDW | E1000_ICR_TXQE)) &&
-		!InterlockedExchange8(&interrupt->TxInterrupt, TRUE))
-	{
-		queueDPC = TRUE;
-	}
-
-	if ((reg_icr & (E1000_ICR_LSC)) &&
-		!InterlockedExchange8(&interrupt->LinkChange, TRUE))
-	{
-		queueDPC = TRUE;
-	}
-
-	if (queueDPC)
-	{
-		WdfInterruptQueueDpcForIsr(wdfInterrupt);
-	}
-
-	return TRUE;
-}
-
-static
-void
-IgbRxNotify(
-	_In_ IGB_INTERRUPT* interrupt,
-	_In_ ULONG queueId)
-{
-	if (InterlockedExchange(&interrupt->RxNotifyArmed[queueId], false))
-	{
-		NetRxQueueNotifyMoreReceivedPacketsAvailable(interrupt->Adapter->RxQueues[queueId]);
-	}
+	return interrupt->IsMsi;
 }
 
 _Use_decl_annotations_
@@ -121,31 +125,34 @@ EvtInterruptDpc(
 	IGB_INTERRUPT* interrupt = IgbGetInterruptContext(Interrupt);
 	IGB_ADAPTER* adapter = interrupt->Adapter;
 	struct e1000_hw* hw = &adapter->Hw;
+	u32 icr = 0, eicr;
 
-	if (InterlockedExchange8(&interrupt->PciInterrupt, FALSE))
-	{
-		DBGPRINT("PCI Interrupt!\n");
-	}
+	eicr = InterlockedExchange(&interrupt->EICR, 0);
 
-	if (InterlockedExchange8(&interrupt->TxInterrupt, FALSE))
+	for (int i = 0; i < IGB_MAX_RX_QUEUES; i++)
 	{
-		//DBGPRINT("TX Interrupt!\n");
-		if (InterlockedExchange(&interrupt->TxNotifyArmed, false))
+		if ((eicr & (1 << i)) != 0)
 		{
-			NetTxQueueNotifyMoreCompletedPacketsAvailable(adapter->TxQueues[0]);
+			if (InterlockedExchange(&interrupt->RxNotifyArmed[i], FALSE))
+				NetRxQueueNotifyMoreReceivedPacketsAvailable(adapter->RxQueues[i]);
 		}
 	}
 
-	if (InterlockedExchange8(&interrupt->RxInterrupt, FALSE))
+	if ((eicr & E1000_EICR_OTHER) != 0)
 	{
-		//DBGPRINT("RX Interrupt!\n");
-		IgbRxNotify(interrupt, 0);
-	}
+		icr = InterlockedExchange(&interrupt->ICR, 0);
 
-	if (InterlockedExchange8(&interrupt->LinkChange, FALSE))
-	{
-		DBGPRINT("Link Interrupt!\n");
-		hw->mac.get_link_status = 1;
-		IgbCheckLinkStatus(adapter);
+		if ((icr & (E1000_ICR_TXDW | E1000_ICR_TXQE)) != 0 &&
+			InterlockedExchange(&interrupt->TxNotifyArmed[0], FALSE))
+		{
+			NetTxQueueNotifyMoreCompletedPacketsAvailable(adapter->TxQueues[0]);
+		}
+
+		if ((icr & E1000_ICR_LSC) != 0)
+		{
+			DBGPRINT("Link Interrupt!\n");
+			hw->mac.get_link_status = 1;
+			IgbCheckLinkStatus(adapter);
+		}
 	}
 }

@@ -7,8 +7,8 @@
 #include "interrupt.h"
 #include "link.h"
 
-#undef DBGPRINT
-#define DBGPRINT(...)
+//#define DBGPRINT_ADVANCE DBGPRINT
+#define DBGPRINT_ADVANCE(...)
 
 _Use_decl_annotations_
 NTSTATUS
@@ -79,7 +79,7 @@ void
 RxIndicateReceives(
 	_In_ IGB_RXQUEUE* rx)
 {
-	DBGPRINT("RxIndicateReceives\n");
+	DBGPRINT_ADVANCE("RxIndicateReceives\n");
 
 	NET_RING* pr = NetRingCollectionGetPacketRing(rx->Rings);
 	NET_RING* fr = NetRingCollectionGetFragmentRing(rx->Rings);
@@ -199,7 +199,7 @@ void
 RxPostBuffers(
 	_In_ IGB_RXQUEUE* rx)
 {
-	DBGPRINT("RxPostBuffers\n");
+	DBGPRINT_ADVANCE("RxPostBuffers\n");
 
 	NET_RING* fr = NetRingCollectionGetFragmentRing(rx->Rings);
 
@@ -229,7 +229,7 @@ IgbRxQueueInitialize(
 	DBGPRINT("IntelRxQueueInitialize\n");
 
 	rx->Adapter = adapter;
-	rx->Interrupt = adapter->Interrupt;
+	rx->InterruptHandle = adapter->Interrupt->Handle;
 	rx->Rings = NetRxQueueGetRingCollection(rxQueue);
 
 	// allocate descriptors
@@ -263,12 +263,13 @@ IgbRxQueueSetInterrupt(
 	_In_ IGB_RXQUEUE* rx,
 	_In_ BOOLEAN notificationEnabled)
 {
-	InterlockedExchange(&rx->Interrupt->RxNotifyArmed[rx->QueueId], notificationEnabled);
+	InterlockedExchange(&rx->Adapter->Interrupt->RxNotifyArmed[rx->QueueId], notificationEnabled);
 
-	WdfInterruptAcquireLock(rx->Interrupt->Handle);
-	E1000_WRITE_REG(&rx->Adapter->Hw, notificationEnabled ? E1000_IMS : E1000_IMC, E1000_IMS_RXT0 | E1000_IMS_RXDMT0 | E1000_IMS_RXSEQ);
+	WdfInterruptAcquireLock(rx->Adapter->Interrupt->Handle);
+	//E1000_WRITE_REG(&rx->Adapter->Hw, notificationEnabled ? E1000_IMS : E1000_IMC, E1000_IMS_RXT0 | E1000_IMS_RXDMT0 | E1000_IMS_RXSEQ);
+	E1000_WRITE_REG(&rx->Adapter->Hw, notificationEnabled ? E1000_EIMS : E1000_EIMC, 1 << rx->QueueId);
 	E1000_WRITE_FLUSH(&rx->Adapter->Hw);
-	WdfInterruptReleaseLock(rx->Interrupt->Handle);
+	WdfInterruptReleaseLock(rx->Adapter->Interrupt->Handle);
 
 	if (!notificationEnabled)
 	{
@@ -385,7 +386,7 @@ EvtRxQueueSetNotificationEnabled(
 	_In_ NETPACKETQUEUE rxQueue,
 	_In_ BOOLEAN notificationEnabled)
 {
-	DBGPRINT("EvtRxQueueSetNotificationEnabled\n");
+	DBGPRINT_ADVANCE("EvtRxQueueSetNotificationEnabled\n");
 	IGB_RXQUEUE* rx = IgbGetRxQueueContext(rxQueue);
 	IgbRxQueueSetInterrupt(rx, notificationEnabled);
 }
@@ -395,11 +396,11 @@ VOID
 EvtRxQueueAdvance(
 	_In_ NETPACKETQUEUE rxQueue)
 {
-	DBGPRINT("EvtRxQueueAdvance\n");
+	DBGPRINT_ADVANCE("EvtRxQueueAdvance\n");
 	IGB_RXQUEUE* rx = IgbGetRxQueueContext(rxQueue);
 	RxIndicateReceives(rx);
 	RxPostBuffers(rx);
-	DBGPRINT("EvtRxQueueAdvance done\n");
+	DBGPRINT_ADVANCE("EvtRxQueueAdvance done\n");
 }
 
 _Use_decl_annotations_
