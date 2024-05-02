@@ -28,10 +28,6 @@ IgbInitializeAdapterContext(
 	GOTO_IF_NOT_NT_SUCCESS(Exit, status,
 		WdfSpinLockCreate(&attributes, &adapter->Lock));
 
-	WDF_OBJECT_ATTRIBUTES timerAttributes;
-	WDF_OBJECT_ATTRIBUTES_INIT(&timerAttributes);
-	timerAttributes.ParentObject = device;
-
 Exit:
 	DBGPRINT("IntelInitializeAdapterContext - %x\n", status);
 
