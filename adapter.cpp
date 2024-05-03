@@ -145,12 +145,17 @@ IgbAdapterSetDatapathCapabilities(
 	NET_ADAPTER_DMA_CAPABILITIES rxDmaCapabilities;
 	NET_ADAPTER_DMA_CAPABILITIES_INIT(&rxDmaCapabilities, adapter->DmaEnabler);
 
+	SIZE_T maxRxQueues = IGB_MAX_RX_QUEUES;
+
+	if (adapter->MsiInterrupts > 1)
+		maxRxQueues = min(maxRxQueues, adapter->MsiInterrupts - 1);
+
 	NET_ADAPTER_RX_CAPABILITIES rxCapabilities;
 	NET_ADAPTER_RX_CAPABILITIES_INIT_SYSTEM_MANAGED_DMA(
 		&rxCapabilities,
 		&rxDmaCapabilities,
 		IGB_BUF_SIZE,
-		IGB_MAX_RX_QUEUES);
+		maxRxQueues);
 
 	rxCapabilities.FragmentBufferAlignment = IGB_RX_BUFFER_ALIGN;
 	rxCapabilities.FragmentRingNumberOfElementsHint = IGB_RX_BUF_NUM;
@@ -297,12 +302,14 @@ EvtAdapterReceiveScalingSetIndirectionEntries(
 	{
 		const ULONG queueId = IgbGetRxQueueContext(indirectionEntries->Entries[i].PacketQueue)->QueueId;
 		const UINT32 index = indirectionEntries->Entries[i].Index;
-		u32 reta = E1000_READ_REG(&adapter->Hw, E1000_RETA(index >> 2));
-		u32 shift = (index & 2) << 3;
-		reta ^= reta & (0xff << shift);
-		reta |= queueId << shift;
-		E1000_WRITE_REG(&adapter->Hw, E1000_RETA(index >> 2), reta);
-		indirectionEntries->Entries[i].Status = STATUS_SUCCESS;
+		if (index < 128)
+		{
+			u32 reta = E1000_READ_REG(&adapter->Hw, E1000_RETA(index >> 2));
+			u32 shift = (index & 2) << 3;
+			reta ^= reta & (0xff << shift);
+			reta |= queueId << shift;
+			E1000_WRITE_REG(&adapter->Hw, E1000_RETA(index >> 2), reta);
+		}
 	}
 
 	return STATUS_SUCCESS;

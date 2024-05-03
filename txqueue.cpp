@@ -98,8 +98,7 @@ IgbTxQueueInitialize(
 	IGB_TXQUEUE* tx = IgbGetTxQueueContext(txQueue);
 
 	tx->Adapter = adapter;
-
-	tx->Interrupt = adapter->Interrupt;
+	tx->Interrupt = adapter->MiscInterrupt;
 	tx->Rings = NetTxQueueGetRingCollection(txQueue);
 
 	NET_RING* pr = NetRingCollectionGetPacketRing(tx->Rings);
@@ -387,8 +386,6 @@ IgbTxQueueSetInterrupt(
 	_In_ IGB_TXQUEUE* tx,
 	_In_ BOOLEAN notificationEnabled)
 {
-	InterlockedExchange(&tx->Interrupt->TxNotifyArmed[tx->QueueId], notificationEnabled);
-
 	WdfInterruptAcquireLock(tx->Interrupt->Handle);
 	E1000_WRITE_REG(&tx->Adapter->Hw, notificationEnabled ? E1000_IMS : E1000_IMC, E1000_IMS_TXDW);
 	E1000_WRITE_FLUSH(&tx->Adapter->Hw);

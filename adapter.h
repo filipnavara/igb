@@ -7,7 +7,7 @@ extern "C"
 
 #define IGB_MAX_TX_QUEUES 1
 #define IGB_MAX_RX_QUEUES 4
-//#define IGB_MAX_QUEUE_INTERRUPTS 4
+#define IGB_MAX_INTERRUPTS 5
 #define IGB_MAX_MCAST_LIST 32
 
 #define IGB_TX_BUF_NUM 1024
@@ -33,8 +33,9 @@ typedef struct _IGB_ADAPTER
 	SIZE_T MMIOSize;
 	BUS_INTERFACE_STANDARD PciConfig;
 
-	// Main interrupt
-	IGB_INTERRUPT* Interrupt;
+	PIGB_INTERRUPT MiscInterrupt;
+	PIGB_INTERRUPT Interrupts[IGB_MAX_INTERRUPTS];
+	UINT MsiInterrupts;
 
 	NET_PACKET_FILTER_FLAGS PacketFilterFlags;
 	UINT MCAddressLength;

@@ -47,18 +47,13 @@ IgbGetResources(
 		}
 		else if (rawDescriptor->Type == CmResourceTypeInterrupt)
 		{
-			/*if (translatedDescriptor->Flags & CM_RESOURCE_INTERRUPT_MESSAGE)
-			{
-				DBGPRINT("MSI/MSI-X interrupt %d\n", rawDescriptor->u.MessageInterrupt.Raw.MessageCount);
-			}
-			else
-			{
-				DBGPRINT("LBI interrupt\n");
-			}*/
-			if (intCnt == 0)
+			if (intCnt < IGB_MAX_INTERRUPTS)
 			{
 				GOTO_IF_NOT_NT_SUCCESS(Exit, status,
-					IgbInterruptCreate(adapter->WdfDevice, adapter, rawDescriptor, translatedDescriptor, &adapter->Interrupt));
+					IgbInterruptCreate(adapter->WdfDevice, adapter, rawDescriptor, translatedDescriptor, &adapter->Interrupts[intCnt]));
+
+				if (translatedDescriptor->Flags & CM_RESOURCE_INTERRUPT_MESSAGE)
+					adapter->MsiInterrupts++;
 			}
 			intCnt++;
 		}
@@ -89,7 +84,6 @@ NTSTATUS
 IgbRegisterScatterGatherDma(
 	_In_ IGB_ADAPTER* adapter)
 {
-	//TraceEntryRtAdapter(adapter);
 	DBGPRINT("IntelRegisterScatterGatherDma\n");
 
 	WDF_DMA_ENABLER_CONFIG dmaEnablerConfig;

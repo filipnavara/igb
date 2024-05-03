@@ -229,7 +229,7 @@ IgbRxQueueInitialize(
 	DBGPRINT("IntelRxQueueInitialize\n");
 
 	rx->Adapter = adapter;
-	rx->InterruptHandle = adapter->Interrupt->Handle;
+	rx->InterruptHandle = adapter->MsiInterrupts > 1 ? adapter->Interrupts[rx->QueueId]->Handle : adapter->MiscInterrupt->Handle;
 	rx->Rings = NetRxQueueGetRingCollection(rxQueue);
 
 	// allocate descriptors
@@ -263,13 +263,10 @@ IgbRxQueueSetInterrupt(
 	_In_ IGB_RXQUEUE* rx,
 	_In_ BOOLEAN notificationEnabled)
 {
-	InterlockedExchange(&rx->Adapter->Interrupt->RxNotifyArmed[rx->QueueId], notificationEnabled);
-
-	WdfInterruptAcquireLock(rx->Adapter->Interrupt->Handle);
-	//E1000_WRITE_REG(&rx->Adapter->Hw, notificationEnabled ? E1000_IMS : E1000_IMC, E1000_IMS_RXT0 | E1000_IMS_RXDMT0 | E1000_IMS_RXSEQ);
+	WdfInterruptAcquireLock(rx->InterruptHandle);
 	E1000_WRITE_REG(&rx->Adapter->Hw, notificationEnabled ? E1000_EIMS : E1000_EIMC, 1 << rx->QueueId);
 	E1000_WRITE_FLUSH(&rx->Adapter->Hw);
-	WdfInterruptReleaseLock(rx->Adapter->Interrupt->Handle);
+	WdfInterruptReleaseLock(rx->InterruptHandle);
 
 	if (!notificationEnabled)
 	{
@@ -336,8 +333,6 @@ EvtRxQueueStart(
 	WdfSpinLockAcquire(adapter->Lock);
 
 	adapter->RxQueues[rx->QueueId] = rxQueue;
-
-	//RtAdapterUpdateRcr(adapter);
 
 	WdfSpinLockRelease(adapter->Lock);
 

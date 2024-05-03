@@ -4,15 +4,8 @@ typedef struct _IGB_INTERRUPT
 {
 	IGB_ADAPTER* Adapter;
 	WDFINTERRUPT Handle;
-
-	// Armed Notifications
-	LONG RxNotifyArmed[IGB_MAX_RX_QUEUES];
-	LONG TxNotifyArmed[IGB_MAX_TX_QUEUES];
-
 	LONG EICR;
 	LONG ICR;
-
-	BOOLEAN IsMsi;
 } IGB_INTERRUPT, *PIGB_INTERRUPT;
 
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(IGB_INTERRUPT, IgbGetInterruptContext);
@@ -27,7 +20,9 @@ IgbInterruptCreate(
 
 void
 IgbInterruptInitialize(
-	_In_ IGB_INTERRUPT* interrupt);
+	_In_ IGB_ADAPTER* adapter);
 
 EVT_WDF_INTERRUPT_ISR EvtInterruptIsr;
 EVT_WDF_INTERRUPT_DPC EvtInterruptDpc;
+EVT_WDF_INTERRUPT_ISR EvtQueueInterruptIsr;
+EVT_WDF_INTERRUPT_DPC EvtQueueInterruptDpc;
