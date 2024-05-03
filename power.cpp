@@ -5,6 +5,7 @@
 #include "device.h"
 #include "adapter.h"
 #include "link.h"
+#include "interrupt.h"
 
 _Use_decl_annotations_
 NTSTATUS
@@ -14,6 +15,7 @@ EvtDeviceD0Entry(
 {
     IGB_ADAPTER* adapter = IgbGetDeviceContext(wdfDevice)->Adapter;
 
+    IgbInterruptInitialize(adapter);
     IgbResetLink(adapter);
 
     return STATUS_SUCCESS;

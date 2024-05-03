@@ -28,10 +28,6 @@ IgbInitializeAdapterContext(
 	GOTO_IF_NOT_NT_SUCCESS(Exit, status,
 		WdfSpinLockCreate(&attributes, &adapter->Lock));
 
-	WDF_OBJECT_ATTRIBUTES timerAttributes;
-	WDF_OBJECT_ATTRIBUTES_INIT(&timerAttributes);
-	timerAttributes.ParentObject = device;
-
 Exit:
 	DBGPRINT("IntelInitializeAdapterContext - %x\n", status);
 
@@ -141,23 +137,28 @@ IgbAdapterSetDatapathCapabilities(
 	NET_ADAPTER_TX_CAPABILITIES_INIT_FOR_DMA(
 		&txCapabilities,
 		&txDmaCapabilities,
-		1);
+		IGB_MAX_TX_QUEUES);
 
-	txCapabilities.FragmentRingNumberOfElementsHint = /*RE_TX_BUF_NUM*/1024;
-	txCapabilities.MaximumNumberOfFragments = /*RE_NTXSEGS*/1;
+	txCapabilities.FragmentRingNumberOfElementsHint = IGB_TX_BUF_NUM;
+	txCapabilities.MaximumNumberOfFragments = IGB_MAX_PHYS_BUF_COUNT;
 
 	NET_ADAPTER_DMA_CAPABILITIES rxDmaCapabilities;
 	NET_ADAPTER_DMA_CAPABILITIES_INIT(&rxDmaCapabilities, adapter->DmaEnabler);
+
+	SIZE_T maxRxQueues = IGB_MAX_RX_QUEUES;
+
+	if (adapter->MsiInterrupts > 1)
+		maxRxQueues = min(maxRxQueues, adapter->MsiInterrupts - 1);
 
 	NET_ADAPTER_RX_CAPABILITIES rxCapabilities;
 	NET_ADAPTER_RX_CAPABILITIES_INIT_SYSTEM_MANAGED_DMA(
 		&rxCapabilities,
 		&rxDmaCapabilities,
 		IGB_BUF_SIZE,
-		1);
+		maxRxQueues);
 
-	rxCapabilities.FragmentBufferAlignment = /*RE_RX_BUFFER_ALIGN*/128;
-	rxCapabilities.FragmentRingNumberOfElementsHint = /*RE_RX_BUF_NUM*/1024;
+	rxCapabilities.FragmentBufferAlignment = IGB_RX_BUFFER_ALIGN;
+	rxCapabilities.FragmentRingNumberOfElementsHint = IGB_RX_BUF_NUM;
 
 	NetAdapterSetDataPathCapabilities(adapter->NetAdapter, &txCapabilities, &rxCapabilities);
 }
@@ -221,6 +222,100 @@ EvtAdapterOffloadSetRxChecksum(
 	adapter->RxUdpHwChkSum = NetOffloadIsRxChecksumUdpEnabled(offload);
 }
 
+
+static
+NTSTATUS
+EvtAdapterReceiveScalingEnable(
+	_In_ NETADAPTER netAdapter,
+	_In_ NET_ADAPTER_RECEIVE_SCALING_HASH_TYPE hashType,
+	_In_ NET_ADAPTER_RECEIVE_SCALING_PROTOCOL_TYPE protocolType)
+{
+	IGB_ADAPTER* adapter = IgbGetAdapterContext(netAdapter);
+
+	DBGPRINT("EvtAdapterReceiveScalingEnable\n");
+
+	u32 mrqc = E1000_MRQC_ENABLE_RSS_4Q;
+
+	if (protocolType & NetAdapterReceiveScalingProtocolTypeIPv4)
+	{
+		mrqc |= E1000_MRQC_RSS_FIELD_IPV4;
+		if (protocolType & NetAdapterReceiveScalingProtocolTypeTcp)
+			mrqc |= E1000_MRQC_RSS_FIELD_IPV4_TCP;
+	}
+
+	if (protocolType & NetAdapterReceiveScalingProtocolTypeIPv6)
+	{
+		mrqc |= E1000_MRQC_RSS_FIELD_IPV6;
+		if (protocolType & NetAdapterReceiveScalingProtocolTypeTcp)
+			mrqc |= E1000_MRQC_RSS_FIELD_IPV6_TCP;
+	}
+
+	// TODO: E1000_MRQC_RSS_FIELD_IPV4_UDP,	E1000_MRQC_RSS_FIELD_IPV6_UDP,
+	// E1000_MRQC_RSS_FIELD_IPV6_UDP_EX, E1000_MRQC_RSS_FIELD_IPV6_TCP_EX
+
+	E1000_WRITE_REG(&adapter->Hw, E1000_MRQC, mrqc);
+
+	return STATUS_SUCCESS;
+}
+
+static
+VOID
+EvtAdapterReceiveScalingDisable(
+	_In_ NETADAPTER netAdapter)
+{
+	IGB_ADAPTER* adapter = IgbGetAdapterContext(netAdapter);
+
+	DBGPRINT("EvtAdapterReceiveScalingDisable\n");
+
+	E1000_WRITE_REG(&adapter->Hw, E1000_MRQC, 0);
+}
+
+static
+NTSTATUS
+EvtAdapterReceiveScalingSetHashSecretKey(
+	_In_ NETADAPTER netAdapter,
+	_In_ NET_ADAPTER_RECEIVE_SCALING_HASH_SECRET_KEY const* hashSecretKey)
+{
+	IGB_ADAPTER* adapter = IgbGetAdapterContext(netAdapter);
+
+	DBGPRINT("EvtAdapterReceiveScalingSetHashSecretKey\n");
+
+	for (int i = 0; i < 10 && i < hashSecretKey->Length; i++)
+	{
+		E1000_WRITE_REG_ARRAY(&adapter->Hw, E1000_RSSRK(0), i, hashSecretKey->Key[i]);
+	}
+
+	return STATUS_SUCCESS;
+}
+
+static
+NTSTATUS
+EvtAdapterReceiveScalingSetIndirectionEntries(
+	_In_ NETADAPTER netAdapter,
+	_In_ NET_ADAPTER_RECEIVE_SCALING_INDIRECTION_ENTRIES* indirectionEntries)
+{
+	IGB_ADAPTER* adapter = IgbGetAdapterContext(netAdapter);
+
+	DBGPRINT("EvtAdapterReceiveScalingSetIndirectionEntries\n");
+
+	for (size_t i = 0; i < indirectionEntries->Length; i++)
+	{
+		const ULONG queueId = IgbGetRxQueueContext(indirectionEntries->Entries[i].PacketQueue)->QueueId;
+		const UINT32 index = indirectionEntries->Entries[i].Index;
+		if (index < 128)
+		{
+			u32 reta = E1000_READ_REG(&adapter->Hw, E1000_RETA(index >> 2));
+			u32 shift = (index & 2) << 3;
+			reta ^= reta & (0xff << shift);
+			reta |= queueId << shift;
+			E1000_WRITE_REG(&adapter->Hw, E1000_RETA(index >> 2), reta);
+		}
+	}
+
+	return STATUS_SUCCESS;
+
+}
+
 static
 void
 IgbAdapterSetOffloadCapabilities(
@@ -271,6 +366,28 @@ IgbAdapterSetOffloadCapabilities(
 	NetAdapterOffloadSetIeee8021qTagCapabilities(adapter->NetAdapter, &ieee8021qTagOffloadCapabilities);
 }
 
+static
+void
+IgbAdapterSetRssCapabilities(
+	_In_ IGB_ADAPTER const* adapter)
+{
+	NET_ADAPTER_RECEIVE_SCALING_CAPABILITIES receiveScalingCapabilities;
+	NET_ADAPTER_RECEIVE_SCALING_CAPABILITIES_INIT(
+		&receiveScalingCapabilities,
+		IGB_MAX_RX_QUEUES,
+		NetAdapterReceiveScalingUnhashedTargetTypeHashIndex,
+		NetAdapterReceiveScalingHashTypeToeplitz,
+		NetAdapterReceiveScalingProtocolTypeIPv4 |
+		NetAdapterReceiveScalingProtocolTypeIPv6 |
+		NetAdapterReceiveScalingProtocolTypeTcp,
+		EvtAdapterReceiveScalingEnable,
+		EvtAdapterReceiveScalingDisable,
+		EvtAdapterReceiveScalingSetHashSecretKey,
+		EvtAdapterReceiveScalingSetIndirectionEntries);
+	receiveScalingCapabilities.SynchronizeSetIndirectionEntries = true;
+	NetAdapterSetReceiveScalingCapabilities(adapter->NetAdapter, &receiveScalingCapabilities);
+}
+
 _Use_decl_annotations_
 NTSTATUS
 IgbAdapterStart(
@@ -284,6 +401,7 @@ IgbAdapterStart(
 	IgbAdapterSetReceiveFilterCapabilities(adapter);
 	IgbAdapterSetDatapathCapabilities(adapter);
 	IgbAdapterSetOffloadCapabilities(adapter);
+	IgbAdapterSetRssCapabilities(adapter);
 
 	IgbUpdateReceiveFilters(adapter);
 

@@ -18,10 +18,11 @@ void IgbResetLink(_In_ IGB_ADAPTER* adapter)
 
 	adapter->Hw.mac.get_link_status = 1;
 
-	WdfInterruptAcquireLock(adapter->Interrupt->Handle);
+	WdfInterruptAcquireLock(adapter->MiscInterrupt->Handle);
 
 	// Clears any pending interrupts
 	E1000_READ_REG(&adapter->Hw, E1000_ICR);
+	E1000_READ_REG(&adapter->Hw, E1000_EICR);
 	// Enable link interrupts
 	E1000_WRITE_REG(&adapter->Hw, E1000_IMS, E1000_IMS_LSC);
 	E1000_WRITE_FLUSH(&adapter->Hw);
@@ -29,7 +30,7 @@ void IgbResetLink(_In_ IGB_ADAPTER* adapter)
 	E1000_WRITE_REG(&adapter->Hw, E1000_VET, /*ETHERTYPE_VLAN*/0x8100);
 	e1000_get_phy_info(&adapter->Hw);
 
-	WdfInterruptReleaseLock(adapter->Interrupt->Handle);
+	WdfInterruptReleaseLock(adapter->MiscInterrupt->Handle);
 
 	IgbCheckLinkStatus(adapter);
 }
@@ -38,8 +39,8 @@ void IgbCheckLinkStatus(_In_ IGB_ADAPTER* adapter)
 {
 	DBGPRINT("IntelCheckLinkStatus\n");
 
-	struct e1000_hw* hw = &adapter->Hw;    
-	bool link_up;
+	struct e1000_hw* hw = &adapter->Hw;
+	bool link_up;	
 
 	e1000_check_for_link(hw);
 	link_up = !hw->mac.get_link_status;

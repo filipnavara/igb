@@ -111,8 +111,6 @@ EvtDriverDeviceAdd(
 
 	GOTO_IF_NOT_NT_SUCCESS(Exit, status,
 		IgbInitializeAdapterContext(adapter, wdfDevice, netAdapter));
-	GOTO_IF_NOT_NT_SUCCESS(Exit, status,
-		IgbInterruptCreate(wdfDevice, adapter, &adapter->Interrupt));
 
 Exit:
 	if (adapterInit != nullptr)
